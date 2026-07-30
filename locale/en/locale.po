@@ -1,0 +1,125 @@
+msgid "plugins.importexport.inspec.displayName"
+msgstr "Inspec Export Plugin"
+
+msgid "plugins.importexport.inspec.description"
+msgstr ""
+"This plugin may be used to export your journal content to <a href=\"https://www.theiet.org/publishing/inspec/\" target=\"_blank\">Inspec</a>. "
+"Content can be downloaded for later delivery to Inspec, or sent to your account on the Inspec server by "
+"configuring your credentials below."
+
+msgid "plugins.importexport.inspec.description.short"
+msgstr "Export journal articles to Inspec."
+
+msgid "plugins.importexport.inspec.senderTask.name"
+msgstr "Inspec automatic deposit task"
+
+msgid "plugins.importexport.inspec.sftpLibraryMissing"
+msgstr ""
+"<blockquote style=\"border: 1px solid; padding: 1em;\"><strong>⚠️ Warning:</strong> The <code>league/flysystem-sftp-v3</code> library is missing from your server. To install it, run:\n"
+"<pre><code>composer -d lib/pkp require league/flysystem-sftp-v3</code></pre>"
+"...or upgrade to a newer release of OJS. Until this is resolved, <strong>SFTP deposits will not work</strong>. Packages can still be downloaded and delivered manually.</blockquote>"
+
+msgid "plugins.importexport.inspec.missingFields"
+msgstr ""
+"This journal is missing some required information. Please go to your <a href="
+"\"{$url}\">Journal Settings</a> and ensure you have entered the publisher and ISSN."
+
+msgid "plugins.importexport.inspec.host"
+msgstr "Host"
+
+msgid "plugins.importexport.inspec.username"
+msgstr "Username"
+
+msgid "plugins.importexport.inspec.password"
+msgstr "Password"
+
+msgid "plugins.importexport.inspec.path"
+msgstr "Path"
+
+msgid "plugins.importexport.inspec.port"
+msgstr "Port (optional, defaults to 22)"
+
+msgid "plugins.importexport.inspec.endpoint"
+msgstr "Connection Details"
+
+msgid "plugins.importexport.inspec.downloadWarning"
+msgstr ""
+"When exporting multiple articles, downloaded packages should not be sent to Inspec. "
+" Please unzip the packages first and send the article-level zip packages to Inspec."
+
+msgid "plugins.importexport.inspec.export.errors"
+msgstr "One or more of the deposits failed. Check the individual article status for details."
+
+msgid "plugins.importexport.inspec.export.failure.settings"
+msgstr "To export the articles to Inspec you must setup the credentials in the settings tab."
+
+msgid "plugins.importexport.inspec.export.failure.jatsFileNotFound"
+msgstr "No suitable JATS XML file was found for export."
+
+msgid "plugins.importexport.inspec.export.failure.multipleArticleFiles"
+msgstr ""
+"Multiple article files were found for this publication. Please ensure there is only "
+"one PDF galley file for this publication and try again."
+
+msgid "plugins.importexport.inspec.export.failure.creatingFile"
+msgstr "Failed to create zip file. The system returned an error: '{$param}'."
+
+msgid "plugins.importexport.inspec.export.failure.submissionVersion"
+msgstr "{$version}, Submission ID {$submissionId}: {$error}"
+
+msgid "plugins.importexport.inspec.export.failure.openingFile"
+msgstr "Failed to open zip file: '{$param}'."
+
+msgid "plugins.importexport.inspec.export.failure.addingFile"
+msgstr "Unable to add file to the Inspec ZIP. The system returned an error: '{$param}'."
+
+msgid "plugins.importexport.inspec.export.failure.jatsValidation"
+msgstr "JATS validation failed. The system returned validation errors: '{$param}'"
+
+msgid "plugins.importexport.inspec.export.failure.jatsModification"
+msgstr "JATS modifications failed. The system returned errors: '{$param}'"
+
+msgid "plugins.importexport.inspec.export.failure.loadJats"
+msgstr "Failed to convert JATS to XML for modifications."
+
+msgid "plugins.importexport.inspec.export.failure.jatsNodeMissing"
+msgstr "Failed to convert JATS - node not found: '{$param}'"
+
+msgid "plugins.importexport.inspec.export.failure.missingMetadata"
+msgstr ""
+"The selected package and file naming scheme requires the following metadata, "
+"which is missing: '{$param}'"
+
+msgid "plugins.importexport.inspec.settings.form.automaticRegistration.description"
+msgstr ""
+"Deposit articles automatically to Inspec. Please note that this may "
+"take a short amount of time after publication to process (e.g. depending on "
+"your cronjob configuration)."
+
+msgid "plugins.importexport.inspec.settings.form.jatsImportedOnly"
+msgstr ""
+"Only allow exports for articles with uploaded JATS XML files. If not enabled, the plugin will use "
+"system-generated JATS when no JATS XML file is present."
+
+msgid "plugins.importexport.inspec.settings.form.journalAbbreviation"
+msgstr "Journal Abbreviation"
+
+msgid "plugins.importexport.inspec.settings.form.journalAbbreviation.description"
+msgstr ""
+"The abbreviation for the journal. This is used as the first part of the name of every "
+"deposited package and file."
+
+msgid "plugins.importexport.inspec.settings.form.namingType"
+msgstr "Package and File Naming Scheme"
+
+msgid "plugins.importexport.inspec.settings.form.namingType.volumeIssue"
+msgstr "Volume/Issue/Page"
+
+msgid "plugins.importexport.inspec.settings.form.namingType.articleNumber"
+msgstr "Article Number"
+
+msgid "plugins.generic.inspec.displayName"
+msgstr "Inspec Plugin"
+
+msgid "plugins.generic.inspec.description"
+msgstr "Exports articles or article versions to Inspec."
