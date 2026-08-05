@@ -85,7 +85,6 @@ class InspecSettingsForm extends PubObjectsExportSettingsForm
         return [
             'jatsImported' => 'bool',
             'automaticRegistration' => 'bool',
-            'nlmTitle' => 'string',
             'namingType' => 'string',
             'host' => 'string',
             'port' => 'string',
@@ -95,17 +94,12 @@ class InspecSettingsForm extends PubObjectsExportSettingsForm
         ];
     }
 
+    /**
+     * All settings are optional. The connection details are only needed for
+     * depositing, which is gated separately by InspecExportPlugin::getExportActions().
+     */
     public function isOptional(string $settingName): bool
     {
-        return in_array($settingName, [
-            'jatsImported',
-            'automaticRegistration',
-            'namingType',
-            'host',
-            'port',
-            'path',
-            'username',
-            'password'
-        ]);
+        return true;
     }
 }

@@ -14,6 +14,22 @@ Packages can either be downloaded for manual delivery, or deposited directly to 
 SFTP endpoint. With **Automatic deposit** enabled, newly published articles are deposited
 by a daily scheduled task.
 
+## Versioning
+
+**Inspec only indexes the first published version of an article.** Any subsequent versions are
+excluded from their feed, and they match articles by DOI otherwise.
+
+The plugin is built around that rule:
+
+- An article is deposited **once**, when it is first published, and is never re-deposited.
+  Publishing, versioning, or unpublishing a later version does not make it depositable again.
+- Articles are always listed and deposited at the **submission** level, even on journals that
+  assign a separate DOI to each version. Individual versions are never deposited as separate
+  objects, so the export page shows a single list of articles rather than a per-version list.
+
+A consequence worth being aware of: if a later version corrects the original, Inspec will
+continue to index the uncorrected first version. There is no mechanism to push the correction.
+
 ## Requirements
 
 - OJS 3.6 or newer.
@@ -41,7 +57,6 @@ Journal Settings → Distribution → Inspec, or the plugin's Import/Export page
 |--------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------|
 | Only use uploaded JATS XML           | When enabled, articles without an uploaded JATS file are skipped rather than falling back to system-generated JATS.                     |
 | Automatic deposit                    | Deposit newly published articles on the daily scheduled task.                                                                           |
-| Journal Abbreviation                 | **Required.** Used as the leading part of every package and file name.                                                                  |
 | Package and file naming scheme       | Either volume/issue/page or article number. The chosen scheme's metadata must be present or the export fails with an explanatory error. |
 | Host, Port, Path, Username, Password | SFTP connection details. Port defaults to 22. The password is stored encrypted.                                                         |
 
@@ -49,8 +64,9 @@ Deposit actions only appear once host, username, and password are all set.
 
 ## Naming
 
-Package and file names are built from the journal abbreviation plus the selected naming scheme,
-lowercased with all non-alphanumeric characters removed:
+Package and file names are built from the journal abbreviation (Journal Settings → Masthead),
+falling back to the journal's URL path when no abbreviation is set, plus the selected naming
+scheme, lowercased with all non-alphanumeric characters removed:
 
 ```
 jhs-12-3-45.zip

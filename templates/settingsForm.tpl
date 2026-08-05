@@ -31,12 +31,6 @@
 				{fbvElement type="checkbox" id="automaticRegistration" label="plugins.importexport.inspec.settings.form.automaticRegistration.description" checked=$automaticRegistration|compare:true}
 			{/fbvFormSection}
 
-			{fbvFormSection}
-				<span class="instruct">{translate key="plugins.importexport.inspec.settings.form.journalAbbreviation.description"}</span>
-				<br/>
-				{fbvElement type="text" required=true id="nlmTitle" value=$nlmTitle label="plugins.importexport.inspec.settings.form.journalAbbreviation" maxlength="100" size=$fbvStyles.size.MEDIUM}
-			{/fbvFormSection}
-
 			{capture assign="namingTypeTitle"}{translate key="plugins.importexport.inspec.settings.form.namingType"}{/capture}
 			{fbvFormSection list=true title=$namingTypeTitle translate=false}
 				{fbvElement type="radio" id="namingType-volumeIssue" name="namingType" value="volumeIssue" checked=$namingType|compare:"volumeIssue" label="plugins.importexport.inspec.settings.form.namingType.volumeIssue"}
@@ -53,8 +47,5 @@
 			{/fbvFormSection}
 		{/fbvFormArea}
 		{fbvFormButtons submitText="common.save" hideCancel="true"}
-		<p>
-			<span class="formRequired">{translate key="common.requiredField"}</span>
-		</p>
 	</form>
 </div>

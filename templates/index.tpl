@@ -46,12 +46,11 @@
 				<li>
 					<a href="#settings-tab">{translate key="plugins.importexport.common.settings"}</a>
 				</li>
+				{* Inspec only indexes the first published version of an article, so
+				   articles are always listed and deposited at the submission level,
+				   even when the journal versions its DOIs. *}
 				{if $allowExport}
-					{if $doiVersioning}
-						<li><a href="#exportPublications-tab">{translate key="plugins.importexport.common.export.publications"}</a></li>
-					{else}
-						<li><a href="#exportSubmissions-tab">{translate key="plugins.importexport.common.export.articles"}</a></li>
-					{/if}
+					<li><a href="#exportSubmissions-tab">{translate key="plugins.importexport.common.export.articles"}</a></li>
 				{/if}
 			</ul>
 			<div id="settings-tab">
@@ -70,75 +69,39 @@
 			</div>
 
 			{if $allowExport}
-				{if $doiVersioning}
-					<div id="exportPublications-tab">
-						<script type="text/javascript">
-							$(function() {ldelim}
-								// Attach the form handler.
-								$('#exportPublicationXmlForm').pkpHandler('$.pkp.controllers.form.FormHandler');
-								{rdelim});
-						</script>
-						<form id="exportPublicationXmlForm" class="pkp_form" action="{plugin_url path="exportPublications"}" method="post">
-							{csrf}
-							<input type="hidden" name="tab" value="exportPublications-tab" />
-							{fbvFormArea id="publicationsXmlForm"}
-							{capture assign=publicationsListGridUrl}{url router=PKP\core\PKPApplication::ROUTE_COMPONENT component="grid.publications.ExportPublishedPublicationsListGridHandler" op="fetchGrid" plugin="InspecExportPlugin" category="importexport" escape=false}{/capture}
-							{load_url_in_div id="publicationsListGridContainer" url=$publicationsListGridUrl}
-							{fbvFormSection list="true"}
-								{fbvElement type="checkbox" id="validation" label="plugins.importexport.common.validation" checked=$validation|default:true}
+				<div id="exportSubmissions-tab">
+					<script type="text/javascript">
+						$(function() {ldelim}
+							// Attach the form handler.
+							$('#exportSubmissionXmlForm').pkpHandler('$.pkp.controllers.form.FormHandler');
+							{rdelim});
+					</script>
+					<form id="exportSubmissionXmlForm" class="pkp_form" action="{plugin_url path="exportSubmissions"}" method="post">
+						{csrf}
+						<input type="hidden" name="tab" value="exportSubmissions-tab" />
+						{fbvFormArea id="submissionsXmlForm"}
+						{capture assign=submissionsListGridUrl}{url router=PKP\core\PKPApplication::ROUTE_COMPONENT component="grid.submissions.ExportPublishedSubmissionsListGridHandler" op="fetchGrid" plugin="InspecExportPlugin" category="importexport" escape=false}{/capture}
+						{load_url_in_div id="submissionsListGridContainer" url=$submissionsListGridUrl}
+						{fbvFormSection list="true"}
+							{fbvElement type="checkbox" id="validation" label="plugins.importexport.common.validation" checked=$validation|default:true}
+						{/fbvFormSection}
+						{if !empty($actionNames)}
+							{fbvFormSection}
+								<ul class="export_actions">
+									{foreach from=$actionNames key=action item=actionName}
+										<li class="export_action">
+											{fbvElement type="submit" label="$actionName" id="$action" name="$action" value="1" class="$action" translate=false inline=true}
+										</li>
+									{/foreach}
+								</ul>
 							{/fbvFormSection}
-							{if !empty($actionNames)}
-								{fbvFormSection}
-									<ul class="export_actions">
-										{foreach from=$actionNames key=action item=actionName}
-											<li class="export_action">
-												{fbvElement type="submit" label="$actionName" id="$action" name="$action" value="1" class="$action" translate=false inline=true}
-											</li>
-										{/foreach}
-									</ul>
-								{/fbvFormSection}
-								{fbvFormSection}
-									{translate key="plugins.importexport.inspec.downloadWarning"}
-								{/fbvFormSection}
-							{/if}
-							{/fbvFormArea}
-						</form>
-					</div>
-				{else}
-					<div id="exportSubmissions-tab">
-						<script type="text/javascript">
-							$(function() {ldelim}
-								// Attach the form handler.
-								$('#exportSubmissionXmlForm').pkpHandler('$.pkp.controllers.form.FormHandler');
-								{rdelim});
-						</script>
-						<form id="exportSubmissionXmlForm" class="pkp_form" action="{plugin_url path="exportSubmissions"}" method="post">
-							{csrf}
-							<input type="hidden" name="tab" value="exportSubmissions-tab" />
-							{fbvFormArea id="submissionsXmlForm"}
-							{capture assign=submissionsListGridUrl}{url router=PKP\core\PKPApplication::ROUTE_COMPONENT component="grid.submissions.ExportPublishedSubmissionsListGridHandler" op="fetchGrid" plugin="InspecExportPlugin" category="importexport" escape=false}{/capture}
-							{load_url_in_div id="submissionsListGridContainer" url=$submissionsListGridUrl}
-							{fbvFormSection list="true"}
-								{fbvElement type="checkbox" id="validation" label="plugins.importexport.common.validation" checked=$validation|default:true}
+							{fbvFormSection}
+								{translate key="plugins.importexport.inspec.downloadWarning"}
 							{/fbvFormSection}
-							{if !empty($actionNames)}
-								{fbvFormSection}
-									<ul class="export_actions">
-										{foreach from=$actionNames key=action item=actionName}
-											<li class="export_action">
-												{fbvElement type="submit" label="$actionName" id="$action" name="$action" value="1" class="$action" translate=false inline=true}
-											</li>
-										{/foreach}
-									</ul>
-								{/fbvFormSection}
-								{fbvFormSection}
-									{translate key="plugins.importexport.inspec.downloadWarning"}
-								{/fbvFormSection}
-							{/if}
-							{/fbvFormArea}
-						</form>
-					</div>
-				{/if}
+						{/if}
+						{/fbvFormArea}
+					</form>
+				</div>
 			{/if}
 		</div>
 	{/if}

@@ -101,14 +101,6 @@ msgstr ""
 "Only allow exports for articles with uploaded JATS XML files. If not enabled, the plugin will use "
 "system-generated JATS when no JATS XML file is present."
 
-msgid "plugins.importexport.inspec.settings.form.journalAbbreviation"
-msgstr "Journal Abbreviation"
-
-msgid "plugins.importexport.inspec.settings.form.journalAbbreviation.description"
-msgstr ""
-"The abbreviation for the journal. This is used as the first part of the name of every "
-"deposited package and file."
-
 msgid "plugins.importexport.inspec.settings.form.namingType"
 msgstr "Package and File Naming Scheme"
 

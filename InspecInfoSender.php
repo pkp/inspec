@@ -19,7 +19,6 @@ use APP\journal\Journal;
 use APP\publication\Publication;
 use APP\submission\Submission;
 use Exception;
-use PKP\context\Context;
 use PKP\plugins\PluginRegistry;
 use PKP\scheduledTask\ScheduledTask;
 use PKP\scheduledTask\ScheduledTaskHelper;
@@ -68,17 +67,13 @@ class InspecInfoSender extends ScheduledTask
         $plugin = $this->plugin;
         $journals = $this->getJournals();
 
+        // Always deposit at the submission level, even when the journal versions
+        // its DOIs. Inspec only indexes the first published version of an article,
+        // so individual versions are never deposited as separate objects.
         foreach ($journals as $journal) {
-            if ($journal->getData(Context::SETTING_DOI_VERSIONING)) {
-                $depositablePublications = $plugin->getAllDepositablePublications($journal);
-                if (count($depositablePublications)) {
-                    $this->registerObjects($depositablePublications, $journal);
-                }
-            } else {
-                $depositableArticles = $plugin->getAllDepositableArticles($journal);
-                if (count($depositableArticles)) {
-                    $this->registerObjects($depositableArticles, $journal);
-                }
+            $depositableArticles = $plugin->getAllDepositableArticles($journal);
+            if (count($depositableArticles)) {
+                $this->registerObjects($depositableArticles, $journal);
             }
         }
 
@@ -108,7 +103,6 @@ class InspecInfoSender extends ScheduledTask
                 empty($connectionSettings['username']) ||
                 empty($connectionSettings['password']) ||
                 !$plugin->getSetting($journalId, 'enabled') ||
-                !$plugin->getSetting($journalId, 'nlmTitle') ||
                 !$plugin->getSetting($journalId, 'automaticRegistration')
             ) {
                 continue;

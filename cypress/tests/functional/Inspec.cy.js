@@ -27,21 +27,17 @@ describe('Inspec plugin tests', function () {
 		cy.get('nav').contains('Tools').click();
 		cy.contains(/Inspec Export Plugin/i, {timeout: 20000}).click();
 
-		// Configure the only required setting; SFTP fields aren't exercised
-		// by the export action (they're only used by the deposit flow).
+		// The settings form has no required fields; the SFTP fields aren't
+		// exercised by the export action (they're only used by the deposit flow).
+		// The package name is taken from the journal's abbreviation (or URL
+		// path when unset), not a setting.
 		cy.waitJQuery({timeout: 20000});
 		cy.get('form#inspecSettingsForm', {timeout: 20000}).should('be.visible');
-		cy.get('input[id^="nlmTitle"]').clear().type('J Public Knowledge', {delay: 0});
 		cy.get('form#inspecSettingsForm button:contains("Save")').click();
 		cy.contains('Your changes have been saved.');
 		cy.waitJQuery({timeout: 20000});
 
-		// Reload so the page re-evaluates configurationErrors with the saved
-		// settings and renders the export tab.
-		cy.reload();
-		cy.waitJQuery({timeout: 20000});
-
-		// Verify the export tab is present once required settings are saved.
+		// Verify the export tab is present.
 		cy.get('a[href="#exportSubmissions-tab"]').should('exist');
 
 		// Drive the export via cy.request to avoid Cypress hanging on the

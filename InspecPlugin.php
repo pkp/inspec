@@ -15,8 +15,18 @@
 namespace APP\plugins\generic\inspec;
 
 use APP\plugins\PubObjectsExportGenericPlugin;
+use PKP\plugins\Hook;
 use PKP\plugins\PluginRegistry;
 
+/**
+ * Inspec only indexes the first published version of an article; any subsequent
+ * versions are excluded from their feed. An article is therefore deposited once,
+ * when it is first published, and is never re-deposited.
+ *
+ * The inherited publication hooks exist to make an already-deposited article
+ * depositable again whenever a new version is published. That is the opposite of
+ * what Inspec wants, so all three are overridden below to do nothing.
+ */
 class InspecPlugin extends PubObjectsExportGenericPlugin
 {
     /**
@@ -43,6 +53,39 @@ class InspecPlugin extends PubObjectsExportGenericPlugin
     public function getDescription(): string
     {
         return __('plugins.generic.inspec.description');
+    }
+
+    /**
+     * @copydoc PubObjectsExportGenericPlugin::handlePublicationVersioning()
+     *
+     * Overridden to do nothing: creating a new version must not clear the deposit
+     * status carried over from the version that was already sent to Inspec.
+     */
+    public function handlePublicationVersioning($hookName, $params): bool
+    {
+        return Hook::CONTINUE;
+    }
+
+    /**
+     * @copydoc PubObjectsExportGenericPlugin::handlePublicationPublishing()
+     *
+     * Overridden to do nothing: publishing a later version must not mark an
+     * already-deposited article stale, which would cause it to be re-deposited.
+     */
+    public function handlePublicationPublishing($hookName, $params): bool
+    {
+        return Hook::CONTINUE;
+    }
+
+    /**
+     * @copydoc PubObjectsExportGenericPlugin::handlePublicationUnpublishing()
+     *
+     * Overridden to do nothing: unpublishing a later version must not mark an
+     * earlier, already-deposited version stale.
+     */
+    public function handlePublicationUnpublishing($hookName, $params): bool
+    {
+        return Hook::CONTINUE;
     }
 
     protected function setExportPlugin(): void

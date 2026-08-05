@@ -281,11 +281,13 @@ class InspecExportPlugin extends PubObjectsExportPlugin implements HasTaskSchedu
     }
 
     /**
-     * Get the journal abbreviation setting value.
+     * Get the journal abbreviation used to name packages and files, falling
+     * back to the journal's URL path when no abbreviation is set.
      */
     public function journalAbbreviation(Context $context): string
     {
-        return ($this->getSetting($context->getId(), 'nlmTitle'));
+        return $context->getData('abbreviation', $context->getPrimaryLocale())
+            ?: $context->getPath();
     }
 
     /**
