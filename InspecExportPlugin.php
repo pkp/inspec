@@ -71,7 +71,7 @@ class InspecExportPlugin extends PubObjectsExportPlugin implements HasTaskSchedu
      * @param bool $ts Whether to include a timestamp in the filename.
      * @param string|null $fileExtension The optional file extension to include in the filename.
      */
-    private function buildFileName(
+    protected function buildFileName(
         string $journalAbbreviation,
         Context $context,
         Submission|Publication|null $object = null,
@@ -349,6 +349,8 @@ class InspecExportPlugin extends PubObjectsExportPlugin implements HasTaskSchedu
                 if ($fp) {
                     try {
                         $fs->writeStream($packagedObject['filename'] . '.zip', $fp);
+                        // Mark the object as registered.
+                        $this->updateStatus($object, PubObjectsExportPlugin::EXPORT_STATUS_REGISTERED);
                     } catch (Throwable $e) {
                         $this->updateStatus(
                             $object,
@@ -356,20 +358,16 @@ class InspecExportPlugin extends PubObjectsExportPlugin implements HasTaskSchedu
                             $e->getMessage()
                         );
                         $errors = true;
-                        continue;
                     } finally {
                         fclose($fp);
-                    }
-                    // Mark the object as registered.
-                    $this->updateStatus($object, PubObjectsExportPlugin::EXPORT_STATUS_REGISTERED);
-                    if (!unlink($packagedObject['path'])) {
-                        error_log('Failed to delete zip file after deposit: ' . $packagedObject['path']);
+                        $this->deleteTempFile($packagedObject['path']);
                     }
                 } else {
                     $errorMessage = $this->convertErrorMessage(
                         ['plugins.importexport.inspec.export.failure.openingFile', $packagedObject['path']]
                     );
                     $this->updateStatus($object, PubObjectsExportPlugin::EXPORT_STATUS_ERROR, $errorMessage);
+                    $this->deleteTempFile($packagedObject['path']);
                     $errors = true;
                 }
             }
@@ -405,8 +403,12 @@ class InspecExportPlugin extends PubObjectsExportPlugin implements HasTaskSchedu
 
         $zipPath = tempnam(sys_get_temp_dir(), 'InspecExport_');
         $zip = new ZipArchive();
-        if ($zip->open($zipPath, ZipArchive::CREATE) !== true) {
-            return ['error' => ['plugins.importexport.inspec.export.failure.creatingFile', $zip->getStatusString()]];
+        // OVERWRITE avoids the "Using empty file as ZipArchive" deprecation that is
+        // raised when opening the empty file tempnam() has already created.
+        if ($zip->open($zipPath, ZipArchive::CREATE | ZipArchive::OVERWRITE) !== true) {
+            $error = ['plugins.importexport.inspec.export.failure.creatingFile', $zip->getStatusString()];
+            $this->deleteTempFile($zipPath);
+            return ['error' => $error];
         }
 
         $filename = $this->buildFileName($journalAbbreviation, $context, $object);
@@ -450,7 +452,11 @@ class InspecExportPlugin extends PubObjectsExportPlugin implements HasTaskSchedu
             $articlePdfFilename = $galleyFilename;
 
             if ($pdfFilesFound > 0) {
-                return ['error' => ['plugins.importexport.inspec.export.failure.multipleArticleFiles']];
+                return $this->discardZip(
+                    $zip,
+                    $zipPath,
+                    ['plugins.importexport.inspec.export.failure.multipleArticleFiles']
+                );
             }
 
             if (
@@ -459,7 +465,11 @@ class InspecExportPlugin extends PubObjectsExportPlugin implements HasTaskSchedu
                     $fileService->fs->read($galleyPath)
                 )
             ) {
-                return ['error' => ['plugins.importexport.inspec.export.failure.addingFile', $zip->getStatusString()]];
+                return $this->discardZip(
+                    $zip,
+                    $zipPath,
+                    ['plugins.importexport.inspec.export.failure.addingFile', $zip->getStatusString()]
+                );
             }
             $pdfFilesFound++;
         }
@@ -467,11 +477,15 @@ class InspecExportPlugin extends PubObjectsExportPlugin implements HasTaskSchedu
         // Add article XML to the zip
         $document = $this->exportXML($object, null, $context, $noValidation, $exportErrors, $articlePdfFilename, $genres);
         if (is_array($document)) {
-            return ['error' => $document];
+            return $this->discardZip($zip, $zipPath, $document);
         } else {
             $articlePathName = $filename . '/' . $this->buildFileName($journalAbbreviation, $context, $object, false, 'xml');
             if (!$zip->addFromString($articlePathName, $document)) {
-                return ['error' => ['plugins.importexport.inspec.export.failure.addingFile', $zip->getStatusString()]];
+                return $this->discardZip(
+                    $zip,
+                    $zipPath,
+                    ['plugins.importexport.inspec.export.failure.addingFile', $zip->getStatusString()]
+                );
             }
             $zipDetails['filename'] = $this->buildFileName($journalAbbreviation, $context, $object, true);
             $zipDetails['path'] = $zipPath;
@@ -489,8 +503,12 @@ class InspecExportPlugin extends PubObjectsExportPlugin implements HasTaskSchedu
     {
         $finalZipPath = tempnam(sys_get_temp_dir(), 'InspecExport_');
         $finalZip = new ZipArchive();
-        if ($finalZip->open($finalZipPath, ZipArchive::CREATE) !== true) {
-            return ['error' => ['plugins.importexport.inspec.export.failure.creatingFile', $finalZip->getStatusString()]];
+        // OVERWRITE avoids the "Using empty file as ZipArchive" deprecation that is
+        // raised when opening the empty file tempnam() has already created.
+        if ($finalZip->open($finalZipPath, ZipArchive::CREATE | ZipArchive::OVERWRITE) !== true) {
+            $error = ['plugins.importexport.inspec.export.failure.creatingFile', $finalZip->getStatusString()];
+            $this->deleteTempFile($finalZipPath);
+            return ['error' => $error];
         }
 
         $createdPaths = [];
@@ -506,24 +524,58 @@ class InspecExportPlugin extends PubObjectsExportPlugin implements HasTaskSchedu
                     'submissionId' => $submissionId,
                     'error' => $this->convertErrorMessage($zipPackage['error'])
                 ]);
-                return ['error' => ['plugins.importexport.inspec.export.failure.creatingFile', $errorDetails]];
+                return $this->discardZip(
+                    $finalZip,
+                    $finalZipPath,
+                    ['plugins.importexport.inspec.export.failure.creatingFile', $errorDetails],
+                    $createdPaths
+                );
             }
-            if (!$finalZip->addFile($zipPackage['path'], $zipPackage['filename'] . '.zip')) {
-                unlink($zipPackage['path']);
-                return ['error' => [
-                    'plugins.importexport.inspec.export.failure.creatingFile',
-                    $finalZip->getStatusString()]
-                ];
-            }
+            // Track the package before adding it so that it is cleaned up either way.
             $createdPaths[] = $zipPackage['path'];
+            if (!$finalZip->addFile($zipPackage['path'], $zipPackage['filename'] . '.zip')) {
+                return $this->discardZip(
+                    $finalZip,
+                    $finalZipPath,
+                    ['plugins.importexport.inspec.export.failure.creatingFile', $finalZip->getStatusString()],
+                    $createdPaths
+                );
+            }
         }
+        // The added files are only read when the archive is closed, so the per-article
+        // packages cannot be removed before this point.
         $finalZip->close();
 
-        // Clean up temporary zip files.
         foreach ($createdPaths as $createdPath) {
-            unlink($createdPath);
+            $this->deleteTempFile($createdPath);
         }
         return ['path' => $finalZipPath];
+    }
+
+    /**
+     * Discard a partially built zip file and any temporary files collected for it,
+     * returning the error for the caller.
+     *
+     * @param array $collectedPaths Additional temporary files to remove.
+     */
+    private function discardZip(ZipArchive $zip, string $zipPath, array $error, array $collectedPaths = []): array
+    {
+        $zip->close();
+        $this->deleteTempFile($zipPath);
+        foreach ($collectedPaths as $collectedPath) {
+            $this->deleteTempFile($collectedPath);
+        }
+        return ['error' => $error];
+    }
+
+    /**
+     * Remove a temporary file created during an export.
+     */
+    private function deleteTempFile(string $path): void
+    {
+        if (file_exists($path) && !unlink($path)) {
+            error_log('Failed to delete temporary export file: ' . $path);
+        }
     }
 
     /**
@@ -663,16 +715,18 @@ class InspecExportPlugin extends PubObjectsExportPlugin implements HasTaskSchedu
             return ['plugins.importexport.inspec.export.failure.jatsNodeMissing', 'article-meta'];
         }
 
-        // Remove any existing self-uri PDF links
-        $selfUriPdfNodes = $xpath->query(
-            "self-uri[@content-type='pdf' or @content-type='application/pdf']",
-            $articleMetaNode
-        );
-        foreach ($selfUriPdfNodes as $selfUriPdfNode) {
-            $selfUriPdfNode->parentNode->removeChild($selfUriPdfNode);
-        }
-
         if ($articlePdfFilename) {
+            // Remove any existing self-uri PDF links. This happens only when there
+            // is a replacement for them, so an article packaged without a PDF galley
+            // keeps whatever PDF reference its JATS already carried.
+            $selfUriPdfNodes = $xpath->query(
+                "self-uri[@content-type='pdf' or @content-type='application/pdf']",
+                $articleMetaNode
+            );
+            foreach ($selfUriPdfNodes as $selfUriPdfNode) {
+                $selfUriPdfNode->parentNode->removeChild($selfUriPdfNode);
+            }
+
             $linkElement = $dom->createElement('self-uri');
             $linkElement->setAttribute('content-type', 'pdf');
             $linkElement->setAttribute('xlink:href', $articlePdfFilename);
