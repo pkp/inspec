@@ -53,8 +53,8 @@ msgstr ""
 msgid "plugins.importexport.inspec.export.failure.settings"
 msgstr "To export the articles to Inspec you must setup the credentials in the settings tab."
 
-msgid "plugins.importexport.inspec.export.failure.noPublishedVersion"
-msgstr "This submission has no published version to deposit."
+msgid "plugins.importexport.inspec.export.failure.noPublication"
+msgstr "This submission has no publication to deposit."
 
 msgid "plugins.importexport.inspec.export.failure.jatsFileNotFound"
 msgstr "No suitable JATS XML file was found for export."

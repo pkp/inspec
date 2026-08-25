@@ -19,7 +19,6 @@ use APP\notification\NotificationManager;
 use APP\plugins\generic\inspec\classes\form\InspecSettingsForm;
 use APP\plugins\generic\inspec\jobs\InspecDeliver;
 use APP\plugins\PubObjectsExportPlugin;
-use APP\publication\enums\VersionStage;
 use APP\publication\Publication;
 use APP\submission\Submission;
 use APP\template\TemplateManager;
@@ -79,29 +78,18 @@ class InspecExportPlugin extends PubObjectsExportPlugin implements HasTaskSchedu
     }
 
     /**
-     * Resolve the publication to deposit. Inspec only indexes the first published
-     * version of an article, even when later versions carry their own DOIs, so a
-     * submission always deposits its original version rather than its current one.
+     * Resolve the publication to deposit, which is the submission's current one.
      *
-     * Only the stages this plugin exports are considered, which is the version of
-     * record alone. An author original published ahead of it is not deposited; the
-     * submission is deposited at its first version of record instead.
+     * Inspec only indexes the first published version of an article, and a submission
+     * is deposited once and never re-deposited, so in practice this is the version
+     * that was current when the article first became depositable. Depositing the
+     * current publication rather than the earliest one keeps the metadata we package
+     * the same metadata the article displays, so an editor fixing a reported problem
+     * knows which version to edit.
      */
-    protected function originalPublication(Submission|Publication $object): ?Publication
+    protected function depositPublication(Submission|Publication $object): ?Publication
     {
-        if ($object instanceof Publication) {
-            return $object;
-        }
-
-        $exportableStages = array_map(
-            fn (VersionStage $stage) => $stage->value,
-            $this->getExportableVersionStages()
-        );
-
-        return collect($object->getPublishedPublications())
-            ->filter(fn (Publication $publication) => in_array($publication->getData('versionStage'), $exportableStages))
-            ->sortBy(fn (Publication $publication) => $publication->getId())
-            ->first();
+        return $object instanceof Publication ? $object : $object->getCurrentPublication();
     }
 
     /**
@@ -120,7 +108,7 @@ class InspecExportPlugin extends PubObjectsExportPlugin implements HasTaskSchedu
         bool $ts = false,
         ?string $fileExtension = null
     ): string {
-        $publication = $object ? $this->originalPublication($object) : null;
+        $publication = $object ? $this->depositPublication($object) : null;
         $parts = [$journalAbbreviation];
 
         if ($publication) {
@@ -260,9 +248,9 @@ class InspecExportPlugin extends PubObjectsExportPlugin implements HasTaskSchedu
     ): array|string {
         libxml_use_internal_errors(true);
 
-        $publication = $this->originalPublication($object);
+        $publication = $this->depositPublication($object);
         if (!$publication) {
-            return ['plugins.importexport.inspec.export.failure.noPublishedVersion'];
+            return ['plugins.importexport.inspec.export.failure.noPublication'];
         }
         $submissionId = $object instanceof Publication ? $object->getData('submissionId') : $object->getId();
         if ($genres == null) {
@@ -453,9 +441,9 @@ class InspecExportPlugin extends PubObjectsExportPlugin implements HasTaskSchedu
         $genreDao = DAORegistry::getDAO('GenreDAO'); /** @var GenreDAO $genreDao */
         $genres = $genreDao->getEnabledByContextId($context->getId());
 
-        $publication = $this->originalPublication($object);
+        $publication = $this->depositPublication($object);
         if (!$publication) {
-            return ['error' => ['plugins.importexport.inspec.export.failure.noPublishedVersion']];
+            return ['error' => ['plugins.importexport.inspec.export.failure.noPublication']];
         }
         $locale = $object->getData('locale');
 
@@ -589,7 +577,7 @@ class InspecExportPlugin extends PubObjectsExportPlugin implements HasTaskSchedu
             $zipPackage = $this->createZip($object, $context, $noValidation);
             if (empty($zipPackage['path']) || empty($zipPackage['filename'])) {
                 $submissionId = $object instanceof Publication ? $object->getData('submissionId') : $object->getId();
-                $versionString = $this->originalPublication($object)?->getData('versionString');
+                $versionString = $this->depositPublication($object)?->getData('versionString');
                 $errorDetails = __('plugins.importexport.inspec.export.failure.submissionVersion', [
                     'version' => $versionString,
                     'submissionId' => $submissionId,

@@ -320,88 +320,69 @@ class InspecExportPluginTest extends PKPTestCase
     }
 
     /**
-     * Inspec only indexes the first published version, so a submission is named after
-     * its original publication and not the version that happens to be current.
+     * A submission is named after its current publication, so the name matches the
+     * metadata the article displays.
      */
-    public function testBuildFileNameResolvesTheOriginalPublicationOfASubmission(): void
+    public function testBuildFileNameResolvesTheCurrentPublicationOfASubmission(): void
     {
         $plugin = $this->createPlugin(['namingType' => 'articleNumber']);
 
-        $original = new Publication();
-        $original->setId(1);
-        $original->setData('articleNumber', 'e999');
-        $original->setData('status', Submission::STATUS_PUBLISHED);
-        $original->setData('versionStage', VersionStage::VERSION_OF_RECORD->value);
-
-        $current = new Publication();
-        $current->setId(2);
-        $current->setData('articleNumber', 'e111');
-        $current->setData('status', Submission::STATUS_PUBLISHED);
-        $current->setData('versionStage', VersionStage::VERSION_OF_RECORD->value);
+        $earlier = $this->publishedPublication(1, ['articleNumber' => 'e999']);
+        $current = $this->publishedPublication(2, ['articleNumber' => 'e111']);
 
         $submission = new Submission();
-        $submission->setData('publications', collect([$original, $current]));
+        $submission->setData('publications', collect([$earlier, $current]));
         $submission->setData('currentPublicationId', 2);
 
         $this->assertSame(
-            'jhs-e999',
+            'jhs-e111',
             $this->invoke($plugin, 'buildFileName', ['JHS', $this->createJournal(), $submission])
         );
     }
 
-    public function testOriginalPublicationIgnoresAnUnpublishedLaterVersion(): void
-    {
-        $plugin = $this->createPlugin();
-
-        $published = new Publication();
-        $published->setId(1);
-        $published->setData('status', Submission::STATUS_PUBLISHED);
-        $published->setData('versionStage', VersionStage::VERSION_OF_RECORD->value);
-
-        $draft = new Publication();
-        $draft->setId(2);
-        $draft->setData('status', Submission::STATUS_QUEUED);
-        $draft->setData('versionStage', VersionStage::VERSION_OF_RECORD->value);
-
-        $submission = new Submission();
-        $submission->setData('publications', collect([$published, $draft]));
-        $submission->setData('currentPublicationId', 2);
-
-        $this->assertSame($published, $this->invoke($plugin, 'originalPublication', [$submission]));
-    }
+    //
+    // depositPublication()
+    //
 
     /**
      * A Publication selected directly is deposited as given; only a Submission is
-     * resolved back to its original version.
+     * resolved to a version.
      */
-    public function testOriginalPublicationPassesAPublicationThrough(): void
+    public function testDepositPublicationPassesAPublicationThrough(): void
     {
         $publication = new Publication();
         $publication->setId(7);
 
         $this->assertSame(
             $publication,
-            $this->invoke($this->createPlugin(), 'originalPublication', [$publication])
+            $this->invoke($this->createPlugin(), 'depositPublication', [$publication])
         );
     }
 
-    public function testOriginalPublicationIsNullWhenNothingIsPublished(): void
+    public function testDepositPublicationIsTheCurrentVersion(): void
     {
-        $draft = new Publication();
-        $draft->setId(1);
-        $draft->setData('status', Submission::STATUS_QUEUED);
-        $draft->setData('versionStage', VersionStage::VERSION_OF_RECORD->value);
+        $earlier = $this->publishedPublication(1);
+        $current = $this->publishedPublication(2);
 
         $submission = new Submission();
-        $submission->setData('publications', collect([$draft]));
-        $submission->setData('currentPublicationId', 1);
+        $submission->setData('publications', collect([$earlier, $current]));
+        $submission->setData('currentPublicationId', 2);
 
-        $this->assertNull($this->invoke($this->createPlugin(), 'originalPublication', [$submission]));
+        $this->assertSame($current, $this->invoke($this->createPlugin(), 'depositPublication', [$submission]));
     }
 
-    //
-    // Version stages
-    //
+    public function testDepositPublicationIsNullWhenThereIsNoCurrentVersion(): void
+    {
+        $submission = new Submission();
+        $submission->setData('publications', collect([$this->publishedPublication(1)]));
+
+        $this->assertNull($this->invoke($this->createPlugin(), 'depositPublication', [$submission]));
+    }
+
+    /**
+     * Only the version of record reaches the export grid, so that is what a submission's
+     * current publication is when it is offered for deposit.
+     */
     public function testOnlyTheVersionOfRecordIsDepositable(): void
     {
         $this->assertSame(
@@ -410,75 +391,15 @@ class InspecExportPluginTest extends PKPTestCase
         );
     }
 
-    /**
-     * An author original published ahead of the version of record is not what Inspec
-     * receives; the first version of record is.
-     */
-    public function testAnAuthorOriginalPublishedFirstIsSkipped(): void
-    {
-        $authorOriginal = $this->publicationAtStage(1, VersionStage::AUTHOR_ORIGINAL);
-        $versionOfRecord = $this->publicationAtStage(2, VersionStage::VERSION_OF_RECORD);
-
-        $submission = new Submission();
-        $submission->setData('publications', collect([$authorOriginal, $versionOfRecord]));
-        $submission->setData('currentPublicationId', 2);
-
-        $this->assertSame(
-            $versionOfRecord,
-            $this->invoke($this->createPlugin(), 'originalPublication', [$submission])
-        );
-    }
-
-    public function testTheFirstOfSeveralVersionsOfRecordIsDeposited(): void
-    {
-        $first = $this->publicationAtStage(2, VersionStage::VERSION_OF_RECORD);
-        $second = $this->publicationAtStage(3, VersionStage::VERSION_OF_RECORD);
-
-        $submission = new Submission();
-        $submission->setData('publications', collect([
-            $this->publicationAtStage(1, VersionStage::AUTHOR_ORIGINAL),
-            $first,
-            $second,
-        ]));
-        $submission->setData('currentPublicationId', 3);
-
-        $this->assertSame($first, $this->invoke($this->createPlugin(), 'originalPublication', [$submission]));
-    }
-
-    public function testASubmissionWithNoVersionOfRecordIsNotDeposited(): void
-    {
-        $submission = new Submission();
-        $submission->setData('publications', collect([
-            $this->publicationAtStage(1, VersionStage::AUTHOR_ORIGINAL),
-            $this->publicationAtStage(2, VersionStage::PUBLISHED_MANUSCRIPT_UNDER_REVIEW),
-        ]));
-        $submission->setData('currentPublicationId', 2);
-
-        $this->assertNull($this->invoke($this->createPlugin(), 'originalPublication', [$submission]));
-    }
-
-    /**
-     * Legacy publications carry no version stage at all, so there is nothing to deposit.
-     */
-    public function testAPublicationWithNoVersionStageIsNotDeposited(): void
-    {
-        $publication = new Publication();
-        $publication->setId(1);
-        $publication->setData('status', Submission::STATUS_PUBLISHED);
-
-        $submission = new Submission();
-        $submission->setData('publications', collect([$publication]));
-        $submission->setData('currentPublicationId', 1);
-
-        $this->assertNull($this->invoke($this->createPlugin(), 'originalPublication', [$submission]));
-    }
-
-    private function publicationAtStage(int $id, VersionStage $stage): Publication
+    private function publishedPublication(int $id, array $data = []): Publication
     {
         $publication = new Publication();
         $publication->setId($id);
         $publication->setData('status', Submission::STATUS_PUBLISHED);
-        $publication->setData('versionStage', $stage->value);
+        $publication->setData('versionStage', VersionStage::VERSION_OF_RECORD->value);
+        foreach ($data as $key => $value) {
+            $publication->setData($key, $value);
+        }
         return $publication;
     }
 
