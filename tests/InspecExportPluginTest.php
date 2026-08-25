@@ -17,6 +17,7 @@ use APP\issue\Repository as IssueRepository;
 use APP\journal\Journal;
 use APP\plugins\generic\inspec\InspecExportPlugin;
 use APP\plugins\PubObjectsExportPlugin;
+use APP\publication\enums\VersionStage;
 use APP\publication\Publication;
 use APP\submission\Submission;
 use DOMDocument;
@@ -196,6 +197,30 @@ class InspecExportPluginTest extends PKPTestCase
     }
 
     //
+    // isAccountComplete()
+    //
+    #[DataProvider('accountProvider')]
+    public function testAccountCompletenessCheck(array $account, bool $complete): void
+    {
+        $plugin = $this->createPlugin();
+
+        $this->assertSame($complete, $plugin->isAccountComplete($account));
+    }
+
+    public static function accountProvider(): array
+    {
+        $complete = ['host' => 'sftp.example.org', 'username' => 'user', 'password' => 'secret'];
+
+        return [
+            'complete' => [$complete, true],
+            'nothing set' => [[], false],
+            'blank strings' => [['host' => '', 'username' => '', 'password' => ''], false],
+            'host only' => [['host' => 'sftp.example.org'], false],
+            'password missing' => [array_diff_key($complete, ['password' => null]), false],
+        ];
+    }
+
+    //
     // buildFileName()
     //
     public function testBuildFileNameWithoutAnObjectIsJustTheAbbreviation(): void
@@ -251,6 +276,28 @@ class InspecExportPluginTest extends PKPTestCase
         );
     }
 
+    /**
+     * A part that resolves to nothing is dropped rather than left as a stray separator.
+     */
+    public function testBuildFileNameDropsEmptyParts(): void
+    {
+        $plugin = $this->createPlugin(['namingType' => 'volumeIssue']);
+
+        $issue = new Issue();
+        $issue->setData('volume', 12);
+        $issueRepository = $this->createMock(IssueRepository::class);
+        $issueRepository->method('get')->willReturn($issue);
+        app()->instance(IssueRepository::class, $issueRepository);
+
+        $publication = new Publication();
+        $publication->setData('issueId', 7);
+
+        $this->assertSame(
+            'jhs-12',
+            $this->invoke($plugin, 'buildFileName', ['JHS', $this->createJournal(), $publication])
+        );
+    }
+
     public function testBuildFileNameDefaultsToTheVolumeIssueSchemeWhenUnset(): void
     {
         $plugin = $this->createPlugin();
@@ -272,22 +319,167 @@ class InspecExportPluginTest extends PKPTestCase
         );
     }
 
-    public function testBuildFileNameResolvesTheCurrentPublicationOfASubmission(): void
+    /**
+     * Inspec only indexes the first published version, so a submission is named after
+     * its original publication and not the version that happens to be current.
+     */
+    public function testBuildFileNameResolvesTheOriginalPublicationOfASubmission(): void
     {
         $plugin = $this->createPlugin(['namingType' => 'articleNumber']);
 
-        $publication = new Publication();
-        $publication->setData('articleNumber', 'e999');
+        $original = new Publication();
+        $original->setId(1);
+        $original->setData('articleNumber', 'e999');
+        $original->setData('status', Submission::STATUS_PUBLISHED);
+        $original->setData('versionStage', VersionStage::VERSION_OF_RECORD->value);
 
-        $submission = $this->getMockBuilder(Submission::class)
-            ->onlyMethods(['getCurrentPublication'])
-            ->getMock();
-        $submission->method('getCurrentPublication')->willReturn($publication);
+        $current = new Publication();
+        $current->setId(2);
+        $current->setData('articleNumber', 'e111');
+        $current->setData('status', Submission::STATUS_PUBLISHED);
+        $current->setData('versionStage', VersionStage::VERSION_OF_RECORD->value);
+
+        $submission = new Submission();
+        $submission->setData('publications', collect([$original, $current]));
+        $submission->setData('currentPublicationId', 2);
 
         $this->assertSame(
             'jhs-e999',
             $this->invoke($plugin, 'buildFileName', ['JHS', $this->createJournal(), $submission])
         );
+    }
+
+    public function testOriginalPublicationIgnoresAnUnpublishedLaterVersion(): void
+    {
+        $plugin = $this->createPlugin();
+
+        $published = new Publication();
+        $published->setId(1);
+        $published->setData('status', Submission::STATUS_PUBLISHED);
+        $published->setData('versionStage', VersionStage::VERSION_OF_RECORD->value);
+
+        $draft = new Publication();
+        $draft->setId(2);
+        $draft->setData('status', Submission::STATUS_QUEUED);
+        $draft->setData('versionStage', VersionStage::VERSION_OF_RECORD->value);
+
+        $submission = new Submission();
+        $submission->setData('publications', collect([$published, $draft]));
+        $submission->setData('currentPublicationId', 2);
+
+        $this->assertSame($published, $this->invoke($plugin, 'originalPublication', [$submission]));
+    }
+
+    /**
+     * A Publication selected directly is deposited as given; only a Submission is
+     * resolved back to its original version.
+     */
+    public function testOriginalPublicationPassesAPublicationThrough(): void
+    {
+        $publication = new Publication();
+        $publication->setId(7);
+
+        $this->assertSame(
+            $publication,
+            $this->invoke($this->createPlugin(), 'originalPublication', [$publication])
+        );
+    }
+
+    public function testOriginalPublicationIsNullWhenNothingIsPublished(): void
+    {
+        $draft = new Publication();
+        $draft->setId(1);
+        $draft->setData('status', Submission::STATUS_QUEUED);
+        $draft->setData('versionStage', VersionStage::VERSION_OF_RECORD->value);
+
+        $submission = new Submission();
+        $submission->setData('publications', collect([$draft]));
+        $submission->setData('currentPublicationId', 1);
+
+        $this->assertNull($this->invoke($this->createPlugin(), 'originalPublication', [$submission]));
+    }
+
+    //
+    // Version stages
+    //
+    public function testOnlyTheVersionOfRecordIsDepositable(): void
+    {
+        $this->assertSame(
+            [VersionStage::VERSION_OF_RECORD],
+            $this->createPlugin()->getExportableVersionStages()
+        );
+    }
+
+    /**
+     * An author original published ahead of the version of record is not what Inspec
+     * receives; the first version of record is.
+     */
+    public function testAnAuthorOriginalPublishedFirstIsSkipped(): void
+    {
+        $authorOriginal = $this->publicationAtStage(1, VersionStage::AUTHOR_ORIGINAL);
+        $versionOfRecord = $this->publicationAtStage(2, VersionStage::VERSION_OF_RECORD);
+
+        $submission = new Submission();
+        $submission->setData('publications', collect([$authorOriginal, $versionOfRecord]));
+        $submission->setData('currentPublicationId', 2);
+
+        $this->assertSame(
+            $versionOfRecord,
+            $this->invoke($this->createPlugin(), 'originalPublication', [$submission])
+        );
+    }
+
+    public function testTheFirstOfSeveralVersionsOfRecordIsDeposited(): void
+    {
+        $first = $this->publicationAtStage(2, VersionStage::VERSION_OF_RECORD);
+        $second = $this->publicationAtStage(3, VersionStage::VERSION_OF_RECORD);
+
+        $submission = new Submission();
+        $submission->setData('publications', collect([
+            $this->publicationAtStage(1, VersionStage::AUTHOR_ORIGINAL),
+            $first,
+            $second,
+        ]));
+        $submission->setData('currentPublicationId', 3);
+
+        $this->assertSame($first, $this->invoke($this->createPlugin(), 'originalPublication', [$submission]));
+    }
+
+    public function testASubmissionWithNoVersionOfRecordIsNotDeposited(): void
+    {
+        $submission = new Submission();
+        $submission->setData('publications', collect([
+            $this->publicationAtStage(1, VersionStage::AUTHOR_ORIGINAL),
+            $this->publicationAtStage(2, VersionStage::PUBLISHED_MANUSCRIPT_UNDER_REVIEW),
+        ]));
+        $submission->setData('currentPublicationId', 2);
+
+        $this->assertNull($this->invoke($this->createPlugin(), 'originalPublication', [$submission]));
+    }
+
+    /**
+     * Legacy publications carry no version stage at all, so there is nothing to deposit.
+     */
+    public function testAPublicationWithNoVersionStageIsNotDeposited(): void
+    {
+        $publication = new Publication();
+        $publication->setId(1);
+        $publication->setData('status', Submission::STATUS_PUBLISHED);
+
+        $submission = new Submission();
+        $submission->setData('publications', collect([$publication]));
+        $submission->setData('currentPublicationId', 1);
+
+        $this->assertNull($this->invoke($this->createPlugin(), 'originalPublication', [$submission]));
+    }
+
+    private function publicationAtStage(int $id, VersionStage $stage): Publication
+    {
+        $publication = new Publication();
+        $publication->setId($id);
+        $publication->setData('status', Submission::STATUS_PUBLISHED);
+        $publication->setData('versionStage', $stage->value);
+        return $publication;
     }
 
     public function testBuildFileNameStripsNonAlphanumericCharactersAndLowercases(): void
@@ -320,6 +512,103 @@ class InspecExportPluginTest extends PKPTestCase
         );
 
         $this->assertMatchesRegularExpression('/^jhs-e12345-\d{14}\.zip$/', $filename);
+    }
+
+    //
+    // createZipCollection()
+    //
+
+    /**
+     * Build the plugin with createZip() stubbed to hand back ready-made packages,
+     * so the collection logic can be exercised without a submission or its files.
+     *
+     * @param array $packages One createZip() return value per call, in order.
+     */
+    private function createPluginWithPackages(array $packages): InspecExportPlugin
+    {
+        $plugin = $this->getMockBuilder(InspecExportPlugin::class)
+            ->disableOriginalConstructor()
+            ->onlyMethods(['getSetting', 'createZip'])
+            ->getMock();
+
+        $plugin->method('getSetting')->willReturn(null);
+        $plugin->method('createZip')->willReturnOnConsecutiveCalls(...$packages);
+
+        return $plugin;
+    }
+
+    /**
+     * Write a stand-in article package and return it in createZip()'s shape.
+     */
+    private function buildPackage(string $filename): array
+    {
+        $path = tempnam(sys_get_temp_dir(), 'InspecTest_');
+        $zip = new ZipArchive();
+        $zip->open($path, ZipArchive::CREATE | ZipArchive::OVERWRITE);
+        $zip->addFromString($filename . '/' . $filename . '.xml', '<article/>');
+        $zip->close();
+
+        return ['filename' => $filename, 'path' => $path];
+    }
+
+    /**
+     * Read back the entry names of a zip file.
+     */
+    private function zipEntries(string $path): array
+    {
+        $zip = new ZipArchive();
+        $zip->open($path);
+        $names = [];
+        for ($i = 0; $i < $zip->numFiles; $i++) {
+            $names[] = $zip->getNameIndex($i);
+        }
+        $zip->close();
+        return $names;
+    }
+
+    public function testASingleObjectIsDownloadedAsItsOwnPackage(): void
+    {
+        $package = $this->buildPackage('jhs-1-1-1');
+        $plugin = $this->createPluginWithPackages([$package]);
+
+        $result = $this->invoke($plugin, 'createZipCollection', [[new Submission()], $this->createJournal()]);
+
+        $this->assertSame($package['path'], $result['path'], 'The package itself is the download');
+
+        // Guards the regression this replaced: a lone article wrapped in a collection zip
+        $this->assertSame(['jhs-1-1-1/jhs-1-1-1.xml'], $this->zipEntries($result['path']));
+
+        unlink($package['path']);
+    }
+
+    public function testSeveralObjectsAreGatheredIntoACollection(): void
+    {
+        $packages = [$this->buildPackage('jhs-1-1-1'), $this->buildPackage('jhs-1-1-9')];
+        $plugin = $this->createPluginWithPackages($packages);
+
+        $result = $this->invoke(
+            $plugin,
+            'createZipCollection',
+            [[new Submission(), new Submission()], $this->createJournal()]
+        );
+
+        $this->assertSame(['jhs-1-1-1.zip', 'jhs-1-1-9.zip'], $this->zipEntries($result['path']));
+
+        // The per-article packages are cleaned up once the collection is closed
+        foreach ($packages as $package) {
+            $this->assertFileDoesNotExist($package['path']);
+        }
+
+        unlink($result['path']);
+    }
+
+    public function testASingleObjectPassesItsErrorStraightThrough(): void
+    {
+        $plugin = $this->createPluginWithPackages([['error' => ['plugins.importexport.inspec.export.failure.loadJats']]]);
+
+        $result = $this->invoke($plugin, 'createZipCollection', [[new Submission()], $this->createJournal()]);
+
+        $this->assertSame(['error' => ['plugins.importexport.inspec.export.failure.loadJats']], $result);
     }
 
     //
@@ -570,5 +859,123 @@ class InspecExportPluginTest extends PKPTestCase
 
         $this->assertIsString($result);
         $this->assertStringContainsString('xlink:href="jhs.pdf"', $result);
+    }
+
+    //
+    // validateJats()
+    //
+    public static function jatsEntityProvider(): array
+    {
+        return [
+            'JATS 1.2 public identifier' => [
+                '-//NLM//DTD JATS (Z39.96) Journal Publishing DTD v1.2 20190208//EN',
+                'http://jats.nlm.nih.gov/publishing/1.2/JATS-journalpublishing1.dtd',
+                true,
+            ],
+            'JATS 1.2 system identifier over https' => [
+                null,
+                'https://jats.nlm.nih.gov/publishing/1.2/JATS-journalpublishing1.dtd',
+                true,
+            ],
+            'another JATS version' => [
+                null,
+                'http://jats.nlm.nih.gov/publishing/1.1/JATS-journalpublishing1.dtd',
+                false,
+            ],
+            'a module the DTD pulls in' => [
+                null,
+                '/somewhere/dtd/jats/1.2/JATS-common1.ent',
+                false,
+            ],
+        ];
+    }
+
+    #[DataProvider('jatsEntityProvider')]
+    public function testResolveJatsEntityPrefersTheBundledDtd(?string $publicId, string $systemId, bool $bundled): void
+    {
+        $resolved = $this->invoke($this->createPlugin(), 'resolveJatsEntity', [$publicId, $systemId, []]);
+
+        if (!$bundled) {
+            $this->assertSame($systemId, $resolved, 'Anything else should be left to libxml');
+            return;
+        }
+
+        $this->assertStringEndsWith('/dtd/jats/1.2/JATS-journalpublishing1.dtd', $resolved);
+        $this->assertFileExists($resolved);
+    }
+
+    /**
+     * Build a DOMDocument from the fixture, optionally declaring a document type.
+     */
+    private function jatsDocument(?string $publicId = null, ?string $systemId = null): DOMDocument
+    {
+        $jats = $this->jats();
+        if ($publicId !== null) {
+            $doctype = sprintf('<!DOCTYPE article PUBLIC "%s" "%s">', $publicId, $systemId);
+            $jats = str_replace('<article ', $doctype . PHP_EOL . '<article ', $jats);
+        }
+        $dom = new DOMDocument();
+        $this->assertTrue($dom->loadXML($jats));
+        return $dom;
+    }
+
+    public function testValidateJatsReportsDtdErrors(): void
+    {
+        // The fixture has no journal-meta, which the DTD requires
+        $dom = $this->jatsDocument(
+            '-//NLM//DTD JATS (Z39.96) Journal Publishing DTD v1.2 20190208//EN',
+            'http://jats.nlm.nih.gov/publishing/1.2/JATS-journalpublishing1.dtd'
+        );
+
+        $result = $this->invoke($this->createPlugin(), 'validateJats', [$dom]);
+
+        $this->assertIsString($result, 'An invalid document should be reported, not accepted');
+        $this->assertStringContainsString('DTD Error', $result);
+        $this->assertStringContainsString('journal-meta', $result);
+    }
+
+    public function testValidateJatsSkipsTheDtdForAnotherJatsVersion(): void
+    {
+        $dom = $this->jatsDocument(
+            '-//NLM//DTD JATS (Z39.96) Journal Publishing DTD v1.1 20151215//EN',
+            'http://jats.nlm.nih.gov/publishing/1.1/JATS-journalpublishing1.dtd'
+        );
+        $plugin = $this->createPlugin();
+
+        $result = $this->invoke($plugin, 'validateJats', [$dom]);
+
+        // The same fixture reports DTD errors when it declares JATS 1.2
+        $this->assertTrue($result, 'A version we cannot validate should not fail the export');
+        $this->assertSame(
+            ['plugins.importexport.inspec.export.warning.jatsVersionUnsupported'],
+            $this->invoke($plugin, 'getValidationWarnings')
+        );
+    }
+
+    public function testValidateJatsSkipsTheDtdWhenNoDoctypeIsDeclared(): void
+    {
+        $plugin = $this->createPlugin();
+
+        $result = $this->invoke($plugin, 'validateJats', [$this->jatsDocument()]);
+
+        $this->assertTrue($result);
+        $this->assertSame(
+            ['plugins.importexport.inspec.export.warning.jatsVersionUnsupported'],
+            $this->invoke($plugin, 'getValidationWarnings')
+        );
+    }
+
+    public function testValidationWarningsAreReportedOncePerExport(): void
+    {
+        $plugin = $this->createPlugin();
+
+        // An export covers many articles, each of which may raise the same warning
+        $this->invoke($plugin, 'validateJats', [$this->jatsDocument()]);
+        $this->invoke($plugin, 'validateJats', [$this->jatsDocument()]);
+
+        $this->assertSame(
+            ['plugins.importexport.inspec.export.warning.jatsVersionUnsupported'],
+            $this->invoke($plugin, 'getValidationWarnings')
+        );
     }
 }

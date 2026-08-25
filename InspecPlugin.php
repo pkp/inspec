@@ -19,9 +19,9 @@ use PKP\plugins\Hook;
 use PKP\plugins\PluginRegistry;
 
 /**
- * Inspec only indexes the first published version of an article; any subsequent
- * versions are excluded from their feed. An article is therefore deposited once,
- * when it is first published, and is never re-deposited.
+ * Inspec only indexes the first published version of an article, even when later
+ * versions carry their own DOIs. An article is therefore deposited once, at its first
+ * version of record, and is never re-deposited.
  *
  * The inherited publication hooks exist to make an already-deposited article
  * depositable again whenever a new version is published. That is the opposite of

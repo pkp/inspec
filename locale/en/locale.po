@@ -42,16 +42,19 @@ msgstr "Port (optional, defaults to 22)"
 msgid "plugins.importexport.inspec.endpoint"
 msgstr "Connection Details"
 
+msgid "plugins.importexport.inspec.submit.success"
+msgstr "Articles submitted for deposit."
+
 msgid "plugins.importexport.inspec.downloadWarning"
 msgstr ""
 "When exporting multiple articles, downloaded packages should not be sent to Inspec. "
 " Please unzip the packages first and send the article-level zip packages to Inspec."
 
-msgid "plugins.importexport.inspec.export.errors"
-msgstr "One or more of the deposits failed. Check the individual article status for details."
-
 msgid "plugins.importexport.inspec.export.failure.settings"
 msgstr "To export the articles to Inspec you must setup the credentials in the settings tab."
+
+msgid "plugins.importexport.inspec.export.failure.noPublishedVersion"
+msgstr "This submission has no published version to deposit."
 
 msgid "plugins.importexport.inspec.export.failure.jatsFileNotFound"
 msgstr "No suitable JATS XML file was found for export."
@@ -76,6 +79,11 @@ msgstr "Unable to add file to the Inspec ZIP. The system returned an error: '{$p
 msgid "plugins.importexport.inspec.export.failure.jatsValidation"
 msgstr "JATS validation failed. The system returned validation errors: '{$param}'"
 
+msgid "plugins.importexport.inspec.export.warning.jatsVersionUnsupported"
+msgstr ""
+"JATS validation is only supported for JATS 1.2. This document does not "
+"declare the JATS 1.2 DTD, so it was exported without being validated."
+
 msgid "plugins.importexport.inspec.export.failure.jatsModification"
 msgstr "JATS modifications failed. The system returned errors: '{$param}'"
 
@@ -95,6 +103,12 @@ msgstr ""
 "Deposit articles automatically to Inspec. Please note that this may "
 "take a short amount of time after publication to process (e.g. depending on "
 "your cronjob configuration)."
+
+msgid "plugins.importexport.inspec.settings.form.accountIncomplete"
+msgstr "Please provide the host, username and password, or leave all three blank."
+
+msgid "plugins.importexport.inspec.settings.form.automaticRegistrationRequiresAccount"
+msgstr "Automatic deposit requires a complete SFTP account: please provide the host, username and password."
 
 msgid "plugins.importexport.inspec.settings.form.jatsImportedOnly"
 msgstr ""

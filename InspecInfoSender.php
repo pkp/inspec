@@ -91,18 +91,19 @@ class InspecInfoSender extends ScheduledTask
     protected function getJournals(): array
     {
         $plugin = $this->plugin;
+        // The "enabled" setting belongs to the generic plugin, not to the export
+        // plugin: they store their settings under their own names.
+        PluginRegistry::loadCategory('generic');
+        $genericPlugin = PluginRegistry::getPlugin('generic', 'inspecplugin');
         $contextDao = Application::getContextDAO();
         $journalFactory = $contextDao->getAll(true);
 
         $journals = [];
         while ($journal = $journalFactory->next()) { /** @var Journal $journal */
             $journalId = $journal->getId();
-            $connectionSettings = $plugin->getConnectionSettings($journal);
             if (
-                empty($connectionSettings['host']) ||
-                empty($connectionSettings['username']) ||
-                empty($connectionSettings['password']) ||
-                !$plugin->getSetting($journalId, 'enabled') ||
+                ($genericPlugin && !$genericPlugin->getEnabled($journalId)) ||
+                !$plugin->hasCompleteConnectionSettings($journalId) ||
                 !$plugin->getSetting($journalId, 'automaticRegistration')
             ) {
                 continue;

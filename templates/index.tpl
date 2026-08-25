@@ -73,8 +73,13 @@
 					<script type="text/javascript">
 						$(function() {ldelim}
 							// Attach the form handler.
-							$('#exportSubmissionXmlForm').pkpHandler('$.pkp.controllers.form.FormHandler');
+							var form = $('#exportSubmissionXmlForm').pkpHandler('$.pkp.controllers.form.FormHandler');
+							// Selecting rows in the grid marks the form as changed; don't warn
+							// the user about unsaved changes when they actually submit it.
+							form.find('button[type=submit]').click(function () {ldelim}
+								form.trigger('unregisterAllForms');
 							{rdelim});
+						{rdelim});
 					</script>
 					<form id="exportSubmissionXmlForm" class="pkp_form" action="{plugin_url path="exportSubmissions"}" method="post">
 						{csrf}

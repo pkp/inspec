@@ -17,7 +17,9 @@ namespace APP\plugins\generic\inspec;
 use APP\facades\Repo;
 use APP\notification\NotificationManager;
 use APP\plugins\generic\inspec\classes\form\InspecSettingsForm;
+use APP\plugins\generic\inspec\jobs\InspecDeliver;
 use APP\plugins\PubObjectsExportPlugin;
+use APP\publication\enums\VersionStage;
 use APP\publication\Publication;
 use APP\submission\Submission;
 use APP\template\TemplateManager;
@@ -28,6 +30,7 @@ use League\Flysystem\Filesystem;
 use League\Flysystem\PhpseclibV3\SftpAdapter;
 use League\Flysystem\PhpseclibV3\SftpConnectionProvider;
 use PKP\context\Context;
+use PKP\core\Core;
 use PKP\core\JSONMessage;
 use PKP\db\DAORegistry;
 use PKP\file\FileManager;
@@ -37,11 +40,24 @@ use PKP\plugins\interfaces\HasTaskScheduler;
 use PKP\scheduledTask\PKPScheduler;
 use PKP\submission\Genre;
 use PKP\submission\GenreDAO;
-use Throwable;
 use ZipArchive;
 
 class InspecExportPlugin extends PubObjectsExportPlugin implements HasTaskScheduler
 {
+    /**
+     * The JATS 1.2 Journal Publishing DTD bundled with the application, and the
+     * identifiers a document uses to name it.
+     */
+    protected const JATS_12_PUBLIC_ID = '-//NLM//DTD JATS (Z39.96) Journal Publishing DTD v1.2 20190208//EN';
+    protected const JATS_12_SYSTEM_ID = 'http://jats.nlm.nih.gov/publishing/1.2/JATS-journalpublishing1.dtd';
+    protected const JATS_12_DTD_PATH = '/dtd/jats/1.2/JATS-journalpublishing1.dtd';
+
+    /**
+     * Conditions raised during an export that are reported to the user without
+     * stopping it, keyed by message key so each is reported once.
+     */
+    protected array $validationWarnings = [];
+
     /**
      * @copydoc ImportExportPlugin::display()
      */
@@ -63,6 +79,32 @@ class InspecExportPlugin extends PubObjectsExportPlugin implements HasTaskSchedu
     }
 
     /**
+     * Resolve the publication to deposit. Inspec only indexes the first published
+     * version of an article, even when later versions carry their own DOIs, so a
+     * submission always deposits its original version rather than its current one.
+     *
+     * Only the stages this plugin exports are considered, which is the version of
+     * record alone. An author original published ahead of it is not deposited; the
+     * submission is deposited at its first version of record instead.
+     */
+    protected function originalPublication(Submission|Publication $object): ?Publication
+    {
+        if ($object instanceof Publication) {
+            return $object;
+        }
+
+        $exportableStages = array_map(
+            fn (VersionStage $stage) => $stage->value,
+            $this->getExportableVersionStages()
+        );
+
+        return collect($object->getPublishedPublications())
+            ->filter(fn (Publication $publication) => in_array($publication->getData('versionStage'), $exportableStages))
+            ->sortBy(fn (Publication $publication) => $publication->getId())
+            ->first();
+    }
+
+    /**
      * Create a filename for files created in the plugin, removing any invalid characters.
      * The naming scheme is determined by the journal's "namingType" setting:
      *  - volumeIssue: journalAbbreviation-volume-issue-firstPage(-timestamp)
@@ -78,7 +120,7 @@ class InspecExportPlugin extends PubObjectsExportPlugin implements HasTaskSchedu
         bool $ts = false,
         ?string $fileExtension = null
     ): string {
-        $publication = $object instanceof Submission ? $object->getCurrentPublication() : $object;
+        $publication = $object ? $this->originalPublication($object) : null;
         $parts = [$journalAbbreviation];
 
         if ($publication) {
@@ -103,7 +145,10 @@ class InspecExportPlugin extends PubObjectsExportPlugin implements HasTaskSchedu
             $parts
         );
 
-        return strtolower(implode('-', $parts) . ($fileExtension ? '.' . $fileExtension : ''));
+        return strtolower(
+            implode('-', array_filter($parts, fn ($part) => $part !== ''))
+            . ($fileExtension ? '.' . $fileExtension : '')
+        );
     }
 
     /**
@@ -152,16 +197,18 @@ class InspecExportPlugin extends PubObjectsExportPlugin implements HasTaskSchedu
                     );
                 }
             }
+
             // Redirect back to the right tab
             $request->redirect(null, null, null, ['plugin', $this->getName()], null, $tab);
         } elseif ($this->_checkForExportAction(PubObjectsExportPlugin::EXPORT_ACTION_EXPORT)) {
             $path = $this->createZipCollection($objects, $context, $noValidation);
+            $this->sendValidationWarnings($request);
             if (!empty($path['error'])) {
                 $this->_sendNotification(
                     $request->getUser(),
                     $path['error'][0],
                     Notification::NOTIFICATION_TYPE_ERROR,
-                    $path['error'][1]
+                    $path['error'][1] ?? null
                 );
                 $request->redirect(null, null, null, ['plugin', $this->getName()], null, $tab);
             } else {
@@ -213,7 +260,10 @@ class InspecExportPlugin extends PubObjectsExportPlugin implements HasTaskSchedu
     ): array|string {
         libxml_use_internal_errors(true);
 
-        $publication = $object instanceof Publication ? $object : $object->getCurrentPublication();
+        $publication = $this->originalPublication($object);
+        if (!$publication) {
+            return ['plugins.importexport.inspec.export.failure.noPublishedVersion'];
+        }
         $submissionId = $object instanceof Publication ? $object->getData('submissionId') : $object->getId();
         if ($genres == null) {
             $genreDao = DAORegistry::getDAO('GenreDAO'); /** @var GenreDAO $genreDao */
@@ -305,25 +355,65 @@ class InspecExportPlugin extends PubObjectsExportPlugin implements HasTaskSchedu
     }
 
     /**
-     * Exports a zip file with the selected articles to the configured Inspec account.
+     * Whether the SFTP account has everything required to deposit to it.
+     */
+    public function hasCompleteConnectionSettings(int $contextId): bool
+    {
+        return $this->isAccountComplete([
+            'host' => $this->getSetting($contextId, 'host'),
+            'username' => $this->getSetting($contextId, 'username'),
+            'password' => $this->getSetting($contextId, 'password'),
+        ]);
+    }
+
+    /**
+     * Whether an SFTP account (host/username/password) is fully filled in. The account
+     * is optional -- a journal may use the plugin for Export only and deliver packages
+     * to Inspec by hand -- but if any of the three is set, all three must be.
+     */
+    public function isAccountComplete(array $account): bool
+    {
+        return !empty($account['host']) && !empty($account['username']) && !empty($account['password']);
+    }
+
+    /**
+     * Queue a delivery job per selected article, so that building the package and
+     * uploading it cannot block the request that triggered the deposit.
      *
+     * @copydoc PubObjectsExportPlugin::depositXML()
+     *
+     * @param Submission[]|Publication[] $objects
      * @param null|mixed $filename
      *
-     * @return bool|array True if the deposit was successful, or an array of error messages.
+     * @return bool|array True once the deliveries are queued, or an array of error message details.
      */
     public function depositXML($objects, $context, $filename = null, ?bool $noValidation = null): bool|array
     {
-        // Verify that the credentials are complete
-        $settings = $this->getConnectionSettings($context);
-        if (
-            empty($settings['host']) ||
-            empty($settings['username']) ||
-            empty($settings['password'])
-        ) {
+        if (!$this->hasCompleteConnectionSettings($context->getId())) {
             return ['plugins.importexport.inspec.export.failure.settings'];
         }
 
-        // Perform the deposit
+        foreach ($objects as $object) {
+            dispatch(new InspecDeliver(
+                $object->getId(),
+                $object instanceof Publication,
+                $context->getId(),
+                $noValidation
+            ));
+            $this->updateStatus($object, PubObjectsExportPlugin::EXPORT_STATUS_SUBMITTED);
+        }
+
+        return true;
+    }
+
+    /**
+     * Write a package to the configured Inspec SFTP account.
+     *
+     * @throws Exception If the package cannot be read, or the upload fails.
+     */
+    public function deliverToEndpoint(string $path, string $filename, Context $context): void
+    {
+        $settings = $this->getConnectionSettings($context);
         $adapter = new SftpAdapter(
             new SftpConnectionProvider(
                 $settings['host'],
@@ -335,49 +425,19 @@ class InspecExportPlugin extends PubObjectsExportPlugin implements HasTaskSchedu
             ),
             $settings['path'] ?: '/'
         );
-        $fs = new Filesystem($adapter);
-        $errors = false;
 
-        foreach ($objects as $object) {
-            $packagedObject = $this->createZip($object, $context, $noValidation);
-            if (array_key_exists('error', $packagedObject)) {
-                $errorMessage = $this->convertErrorMessage($packagedObject['error']);
-                $this->updateStatus($object, PubObjectsExportPlugin::EXPORT_STATUS_ERROR, $errorMessage);
-                $errors = true;
-            } else {
-                $fp = fopen($packagedObject['path'], 'r');
-                if ($fp) {
-                    try {
-                        $fs->writeStream($packagedObject['filename'] . '.zip', $fp);
-                        // Mark the object as registered.
-                        $this->updateStatus($object, PubObjectsExportPlugin::EXPORT_STATUS_REGISTERED);
-                    } catch (Throwable $e) {
-                        $this->updateStatus(
-                            $object,
-                            PubObjectsExportPlugin::EXPORT_STATUS_ERROR,
-                            $e->getMessage()
-                        );
-                        $errors = true;
-                    } finally {
-                        fclose($fp);
-                        $this->deleteTempFile($packagedObject['path']);
-                    }
-                } else {
-                    $errorMessage = $this->convertErrorMessage(
-                        ['plugins.importexport.inspec.export.failure.openingFile', $packagedObject['path']]
-                    );
-                    $this->updateStatus($object, PubObjectsExportPlugin::EXPORT_STATUS_ERROR, $errorMessage);
-                    $this->deleteTempFile($packagedObject['path']);
-                    $errors = true;
-                }
-            }
+        $fp = fopen($path, 'r');
+        if (!$fp) {
+            throw new Exception(
+                $this->convertErrorMessage(['plugins.importexport.inspec.export.failure.openingFile', $path])
+            );
         }
 
-        if ($errors) {
-            return ['plugins.importexport.inspec.export.errors'];
+        try {
+            (new Filesystem($adapter))->writeStream($filename, $fp);
+        } finally {
+            fclose($fp);
         }
-
-        return true;
     }
 
     /**
@@ -393,7 +453,10 @@ class InspecExportPlugin extends PubObjectsExportPlugin implements HasTaskSchedu
         $genreDao = DAORegistry::getDAO('GenreDAO'); /** @var GenreDAO $genreDao */
         $genres = $genreDao->getEnabledByContextId($context->getId());
 
-        $publication = $object instanceof Submission ? $object->getCurrentPublication() : $object;
+        $publication = $this->originalPublication($object);
+        if (!$publication) {
+            return ['error' => ['plugins.importexport.inspec.export.failure.noPublishedVersion']];
+        }
         $locale = $object->getData('locale');
 
         // Ensure the metadata required by the configured naming type is present
@@ -497,10 +560,20 @@ class InspecExportPlugin extends PubObjectsExportPlugin implements HasTaskSchedu
     /**
      * Create a zip file of collected objects for download.
      *
+     * A single object is downloaded as its own package. Only several objects are
+     * gathered into a collection, because Inspec takes one article per zip.
+     *
      * @return array the path of the created zip file or error details, if applicable.
      */
     private function createZipCollection(array $objects, Context $context, ?bool $noValidation = null): array
     {
+        if (count($objects) === 1) {
+            $zipPackage = $this->createZip(reset($objects), $context, $noValidation);
+            return empty($zipPackage['path'])
+                ? ['error' => $zipPackage['error']]
+                : ['path' => $zipPackage['path']];
+        }
+
         $finalZipPath = tempnam(sys_get_temp_dir(), 'InspecExport_');
         $finalZip = new ZipArchive();
         // OVERWRITE avoids the "Using empty file as ZipArchive" deprecation that is
@@ -516,9 +589,7 @@ class InspecExportPlugin extends PubObjectsExportPlugin implements HasTaskSchedu
             $zipPackage = $this->createZip($object, $context, $noValidation);
             if (empty($zipPackage['path']) || empty($zipPackage['filename'])) {
                 $submissionId = $object instanceof Publication ? $object->getData('submissionId') : $object->getId();
-                $versionString = $object instanceof Publication ?
-                    $object->getData('versionString') :
-                    $object->getCurrentPublication()->getData('versionString');
+                $versionString = $this->originalPublication($object)?->getData('versionString');
                 $errorDetails = __('plugins.importexport.inspec.export.failure.submissionVersion', [
                     'version' => $versionString,
                     'submissionId' => $submissionId,
@@ -571,7 +642,7 @@ class InspecExportPlugin extends PubObjectsExportPlugin implements HasTaskSchedu
     /**
      * Remove a temporary file created during an export.
      */
-    private function deleteTempFile(string $path): void
+    public function deleteTempFile(string $path): void
     {
         if (file_exists($path) && !unlink($path)) {
             error_log('Failed to delete temporary export file: ' . $path);
@@ -652,6 +723,17 @@ class InspecExportPlugin extends PubObjectsExportPlugin implements HasTaskSchedu
     }
 
     /**
+     * @copydoc PubObjectsExportPlugin::getDepositSuccessNotificationMessageKey()
+     *
+     * Deliveries are queued rather than performed in the request, so the deposit
+     * action reports that the articles were submitted, not that they arrived.
+     */
+    public function getDepositSuccessNotificationMessageKey(): string
+    {
+        return 'plugins.importexport.inspec.submit.success';
+    }
+
+    /**
      * @copydoc PubObjectsExportPlugin::getSettingsFormClassName()
      */
     public function getSettingsFormClassName(): string
@@ -685,11 +767,7 @@ class InspecExportPlugin extends PubObjectsExportPlugin implements HasTaskSchedu
     public function getExportActions($context): array
     {
         $actions = [PubObjectsExportPlugin::EXPORT_ACTION_EXPORT, PubObjectsExportPlugin::EXPORT_ACTION_MARKREGISTERED];
-        if (
-            !empty($this->getSetting($context->getId(), 'host')) &&
-            !empty($this->getSetting($context->getId(), 'username')) &&
-            !empty($this->getSetting($context->getId(), 'password'))
-        ) {
+        if ($this->hasCompleteConnectionSettings($context->getId())) {
             array_unshift($actions, PubObjectsExportPlugin::EXPORT_ACTION_DEPOSIT);
         }
         return $actions;
@@ -745,6 +823,66 @@ class InspecExportPlugin extends PubObjectsExportPlugin implements HasTaskSchedu
     }
 
     /**
+     * Resolve the JATS 1.2 publishing DTD, and the modules it includes, to the copy
+     * bundled with the application, so that validation does not depend on a request to
+     * jats.nlm.nih.gov. Any other document type is fetched as before.
+     */
+    protected function resolveJatsEntity(?string $publicId, string $systemId, array $context): mixed
+    {
+        return $this->isBundledJatsIdentifier($publicId, $systemId)
+            ? Core::getBaseDir() . self::JATS_12_DTD_PATH
+            : $systemId;
+    }
+
+    /**
+     * Whether a document declares the JATS version bundled with the application, and can
+     * therefore be validated against it. Generated JATS always does; uploaded JATS may
+     * declare another version, or no document type at all.
+     */
+    protected function isBundledJatsVersion(DOMDocument $importedJats): bool
+    {
+        $doctype = $importedJats->doctype;
+
+        return $doctype !== null && $this->isBundledJatsIdentifier($doctype->publicId, $doctype->systemId);
+    }
+
+    /**
+     * Whether a public or system identifier names the JATS DTD bundled with the application.
+     */
+    protected function isBundledJatsIdentifier(?string $publicId, ?string $systemId): bool
+    {
+        return $publicId === self::JATS_12_PUBLIC_ID
+            || ($systemId !== null && str_replace('https://', 'http://', $systemId) === self::JATS_12_SYSTEM_ID);
+    }
+
+    /**
+     * Record a condition that should be reported to the user without stopping the export.
+     */
+    protected function addValidationWarning(string $messageKey): void
+    {
+        $this->validationWarnings[$messageKey] = true;
+    }
+
+    /**
+     * @return string[] Message keys collected so far.
+     */
+    protected function getValidationWarnings(): array
+    {
+        return array_keys($this->validationWarnings);
+    }
+
+    /**
+     * Report everything collected during an export, then clear it.
+     */
+    protected function sendValidationWarnings($request): void
+    {
+        foreach ($this->getValidationWarnings() as $messageKey) {
+            $this->_sendNotification($request->getUser(), $messageKey, Notification::NOTIFICATION_TYPE_WARNING);
+        }
+        $this->validationWarnings = [];
+    }
+
+    /**
      * Validate a JATS XML document against the DTD.
      *
      * @return true|string true if valid, or an error message.
@@ -753,7 +891,23 @@ class InspecExportPlugin extends PubObjectsExportPlugin implements HasTaskSchedu
     {
         libxml_use_internal_errors(true);
 
-        if (!$importedJats->validate()) {
+        // Validate against the bundled DTD rather than jats.nlm.nih.gov. Only that one
+        // version is available, so a document declaring any other cannot be validated
+        // at all and is reported to the user instead.
+        if (!$this->isBundledJatsVersion($importedJats)) {
+            $this->addValidationWarning('plugins.importexport.inspec.export.warning.jatsVersionUnsupported');
+            libxml_clear_errors();
+            return true;
+        }
+
+        libxml_set_external_entity_loader($this->resolveJatsEntity(...));
+        try {
+            $isValid = $importedJats->validate();
+        } finally {
+            libxml_set_external_entity_loader(null);
+        }
+
+        if (!$isValid) {
             $errors = libxml_get_errors();
             $validationErrors = [];
             foreach ($errors as $error) {
@@ -807,7 +961,7 @@ class InspecExportPlugin extends PubObjectsExportPlugin implements HasTaskSchedu
     /**
      * Helper to convert an error array to a string.
      */
-    protected function convertErrorMessage(array $errorMessage): string
+    public function convertErrorMessage(array $errorMessage): string
     {
         $message = $errorMessage[0];
         $param = $errorMessage[1] ?? null;

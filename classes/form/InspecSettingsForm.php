@@ -17,6 +17,10 @@ namespace APP\plugins\generic\inspec\classes\form;
 use APP\plugins\generic\inspec\InspecExportPlugin;
 use APP\plugins\PubObjectsExportSettingsForm;
 use Exception;
+use PKP\form\validation\FormValidator;
+use PKP\form\validation\FormValidatorCSRF;
+use PKP\form\validation\FormValidatorCustom;
+use PKP\form\validation\FormValidatorPost;
 
 class InspecSettingsForm extends PubObjectsExportSettingsForm
 {
@@ -26,6 +30,45 @@ class InspecSettingsForm extends PubObjectsExportSettingsForm
     public function __construct(private readonly InspecExportPlugin $plugin, private readonly int $contextId)
     {
         parent::__construct($this->plugin->getTemplateResource('settingsForm.tpl'));
+
+        $this->addCheck(new FormValidatorPost($this));
+        $this->addCheck(new FormValidatorCSRF($this));
+        // The SFTP account is optional (Export-only use is valid), but partially
+        // filling it in is not -- either all of host/username/password, or none.
+        // The check is attached to each of the three so that whichever ones were
+        // filled in are the ones flagged.
+        foreach (['host', 'username', 'password'] as $accountField) {
+            $this->addCheck(
+                new FormValidatorCustom(
+                    $this,
+                    $accountField,
+                    FormValidator::FORM_VALIDATOR_OPTIONAL_VALUE,
+                    'plugins.importexport.inspec.settings.form.accountIncomplete',
+                    fn () => $this->plugin->isAccountComplete($this->getAccountData())
+                )
+            );
+        }
+        $this->addCheck(
+            new FormValidatorCustom(
+                $this,
+                'automaticRegistration',
+                FormValidator::FORM_VALIDATOR_OPTIONAL_VALUE,
+                'plugins.importexport.inspec.settings.form.automaticRegistrationRequiresAccount',
+                fn () => $this->plugin->isAccountComplete($this->getAccountData())
+            )
+        );
+    }
+
+    /**
+     * The submitted (not yet saved) host/username/password.
+     */
+    protected function getAccountData(): array
+    {
+        return [
+            'host' => $this->getData('host'),
+            'username' => $this->getData('username'),
+            'password' => $this->getData('password'),
+        ];
     }
 
     //
