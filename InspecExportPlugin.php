@@ -52,12 +52,6 @@ class InspecExportPlugin extends PubObjectsExportPlugin implements HasTaskSchedu
     protected const JATS_12_DTD_PATH = '/dtd/jats/1.2/JATS-journalpublishing1.dtd';
 
     /**
-     * Conditions raised during an export that are reported to the user without
-     * stopping it, keyed by message key so each is reported once.
-     */
-    protected array $validationWarnings = [];
-
-    /**
      * @copydoc ImportExportPlugin::display()
      */
     public function display($args, $request): void
@@ -190,7 +184,6 @@ class InspecExportPlugin extends PubObjectsExportPlugin implements HasTaskSchedu
             $request->redirect(null, null, null, ['plugin', $this->getName()], null, $tab);
         } elseif ($this->_checkForExportAction(PubObjectsExportPlugin::EXPORT_ACTION_EXPORT)) {
             $path = $this->createZipCollection($objects, $context, $noValidation);
-            $this->sendValidationWarnings($request);
             if (!empty($path['error'])) {
                 $this->_sendNotification(
                     $request->getUser(),
@@ -844,33 +837,6 @@ class InspecExportPlugin extends PubObjectsExportPlugin implements HasTaskSchedu
     }
 
     /**
-     * Record a condition that should be reported to the user without stopping the export.
-     */
-    protected function addValidationWarning(string $messageKey): void
-    {
-        $this->validationWarnings[$messageKey] = true;
-    }
-
-    /**
-     * @return string[] Message keys collected so far.
-     */
-    protected function getValidationWarnings(): array
-    {
-        return array_keys($this->validationWarnings);
-    }
-
-    /**
-     * Report everything collected during an export, then clear it.
-     */
-    protected function sendValidationWarnings($request): void
-    {
-        foreach ($this->getValidationWarnings() as $messageKey) {
-            $this->_sendNotification($request->getUser(), $messageKey, Notification::NOTIFICATION_TYPE_WARNING);
-        }
-        $this->validationWarnings = [];
-    }
-
-    /**
      * Validate a JATS XML document against the DTD.
      *
      * @return true|string true if valid, or an error message.
@@ -879,11 +845,17 @@ class InspecExportPlugin extends PubObjectsExportPlugin implements HasTaskSchedu
     {
         libxml_use_internal_errors(true);
 
-        // Validate against the bundled DTD rather than jats.nlm.nih.gov. Only that one
-        // version is available, so a document declaring any other cannot be validated
-        // at all and is reported to the user instead.
+        // Validate against the bundled DTD rather than jats.nlm.nih.gov. Only JATS 1.2
+        // is bundled, so a document declaring any other version, or none, cannot be
+        // validated and is deposited as it is.
+        //
+        // @todo Report this to the journal instead of passing silently. It cannot be a
+        // notification: deposits are built in a queue job, so neither the manual nor the
+        // scheduled path has a request or a user by the time this runs. It is also a
+        // standing fact about the article's uploaded JATS rather than about one deposit,
+        // so it wants to be stored per article and surfaced in the export grid, next to
+        // the deposit status.
         if (!$this->isBundledJatsVersion($importedJats)) {
-            $this->addValidationWarning('plugins.importexport.inspec.export.warning.jatsVersionUnsupported');
             libxml_clear_errors();
             return true;
         }

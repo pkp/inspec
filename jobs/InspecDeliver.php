@@ -49,18 +49,12 @@ class InspecDeliver extends BaseJob
      */
     public function handle(): void
     {
-        /** @var Submission|Publication|null $object */
-        $object = $this->isPublication
-            ? Repo::publication()->get($this->objectId)
-            : Repo::submission()->get($this->objectId);
+        $plugin = $this->registerPlugin();
+        $object = $this->getObject();
 
         if (!$object) {
             throw new JobException(JobException::INVALID_PAYLOAD);
         }
-
-        PluginRegistry::register('importexport', new InspecExportPlugin(), 'plugins/generic/inspec/InspecExportPlugin', $this->contextId);
-        /** @var InspecExportPlugin $plugin */
-        $plugin = PluginRegistry::getPlugin('importexport', 'InspecExportPlugin');
 
         // Queuing a delivery marks the article submitted, so a status still reading
         // "registered" here means an earlier attempt of this job already delivered it.
@@ -68,22 +62,91 @@ class InspecDeliver extends BaseJob
             return;
         }
 
+        // The journal can be removed while deliveries for it are still queued. Like a
+        // package that cannot be built below, this will fail the same way on every
+        // attempt, so record the failure for the status column and stop: throwing would
+        // only have the queue retry it and log a stack trace for each attempt.
         $context = Application::getContextDAO()->getById($this->contextId);
+        if (!$context) {
+            $errorMessage = $plugin->convertErrorMessage(
+                ['plugins.importexport.inspec.export.failure.journalNotFound']
+            );
+            $plugin->updateStatus($object, PubObjectsExportPlugin::EXPORT_STATUS_ERROR, $errorMessage);
+            return;
+        }
+
+        // Missing metadata, an unreadable galley or invalid JATS are content problems for
+        // an editor to fix, and the recorded message is the whole report
         $package = $plugin->createZip($object, $context, $this->noValidation);
         if (isset($package['error'])) {
             $errorMessage = $plugin->convertErrorMessage($package['error']);
             $plugin->updateStatus($object, PubObjectsExportPlugin::EXPORT_STATUS_ERROR, $errorMessage);
-            throw new JobException($errorMessage);
+            return;
         }
 
         try {
             $plugin->deliverToEndpoint($package['path'], $package['filename'] . '.zip', $context);
             $plugin->updateStatus($object, PubObjectsExportPlugin::EXPORT_STATUS_REGISTERED);
         } catch (Throwable $e) {
+            // A refused connection or a dropped transfer may well succeed on a later
+            // attempt, so this one is thrown for the queue to retry
             $plugin->updateStatus($object, PubObjectsExportPlugin::EXPORT_STATUS_ERROR, $e->getMessage());
             throw new JobException($e->getMessage());
         } finally {
             $plugin->deleteTempFile($package['path']);
         }
+    }
+
+    /**
+     * Record a delivery that failed for a reason handle() could not report itself --
+     * a galley file that could not be read, an unfinished package, a timeout -- once
+     * no attempts remain. Without this the article would keep the "submitted" status
+     * it was queued with, which the automatic deposit task does not pick up again.
+     */
+    public function failed(Throwable $exception): void
+    {
+        $plugin = $this->registerPlugin();
+        $object = $this->getObject();
+
+        if (
+            !$object ||
+            $object->getData($plugin->getDepositStatusSettingName()) === PubObjectsExportPlugin::EXPORT_STATUS_REGISTERED
+        ) {
+            return;
+        }
+
+        $plugin->updateStatus($object, PubObjectsExportPlugin::EXPORT_STATUS_ERROR, $exception->getMessage());
+    }
+
+    /**
+     * Register the export plugin, and hand back whichever instance the registry holds.
+     *
+     * This has to happen before anything loads a submission or publication: registering
+     * is what adds the plugin's deposit status fields to the publication schema, and the
+     * schema is only built once per process.
+     */
+    protected function registerPlugin(): InspecExportPlugin
+    {
+        PluginRegistry::register(
+            'importexport',
+            new InspecExportPlugin(),
+            'plugins/generic/inspec',
+            $this->contextId
+        );
+
+        /** @var InspecExportPlugin $plugin */
+        $plugin = PluginRegistry::getPlugin('importexport', 'InspecExportPlugin');
+
+        return $plugin;
+    }
+
+    /**
+     * Load the object this delivery was queued for.
+     */
+    protected function getObject(): Submission|Publication|null
+    {
+        return $this->isPublication
+            ? Repo::publication()->get($this->objectId)
+            : Repo::submission()->get($this->objectId);
     }
 }

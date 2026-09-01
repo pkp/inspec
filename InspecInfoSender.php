@@ -102,7 +102,7 @@ class InspecInfoSender extends ScheduledTask
         while ($journal = $journalFactory->next()) { /** @var Journal $journal */
             $journalId = $journal->getId();
             if (
-                ($genericPlugin && !$genericPlugin->getEnabled($journalId)) ||
+                !$genericPlugin?->getEnabled($journalId) ||
                 !$plugin->hasCompleteConnectionSettings($journalId) ||
                 !$plugin->getSetting($journalId, 'automaticRegistration')
             ) {

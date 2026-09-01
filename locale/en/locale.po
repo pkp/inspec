@@ -56,6 +56,9 @@ msgstr "To export the articles to Inspec you must setup the credentials in the s
 msgid "plugins.importexport.inspec.export.failure.noPublication"
 msgstr "This submission has no publication to deposit."
 
+msgid "plugins.importexport.inspec.export.failure.journalNotFound"
+msgstr "The journal this deposit was queued for could not be found."
+
 msgid "plugins.importexport.inspec.export.failure.jatsFileNotFound"
 msgstr "No suitable JATS XML file was found for export."
 
@@ -78,11 +81,6 @@ msgstr "Unable to add file to the Inspec ZIP. The system returned an error: '{$p
 
 msgid "plugins.importexport.inspec.export.failure.jatsValidation"
 msgstr "JATS validation failed. The system returned validation errors: '{$param}'"
-
-msgid "plugins.importexport.inspec.export.warning.jatsVersionUnsupported"
-msgstr ""
-"JATS validation is only supported for JATS 1.2. This document does not "
-"declare the JATS 1.2 DTD, so it was exported without being validated."
 
 msgid "plugins.importexport.inspec.export.failure.jatsModification"
 msgstr "JATS modifications failed. The system returned errors: '{$param}'"

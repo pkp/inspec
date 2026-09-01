@@ -855,48 +855,26 @@ class InspecExportPluginTest extends PKPTestCase
         $this->assertStringContainsString('journal-meta', $result);
     }
 
+    /**
+     * Only JATS 1.2 can be validated, so any other version passes. The same fixture
+     * reports DTD errors when it declares JATS 1.2.
+     */
     public function testValidateJatsSkipsTheDtdForAnotherJatsVersion(): void
     {
         $dom = $this->jatsDocument(
             '-//NLM//DTD JATS (Z39.96) Journal Publishing DTD v1.1 20151215//EN',
             'http://jats.nlm.nih.gov/publishing/1.1/JATS-journalpublishing1.dtd'
         );
-        $plugin = $this->createPlugin();
 
-        $result = $this->invoke($plugin, 'validateJats', [$dom]);
+        $result = $this->invoke($this->createPlugin(), 'validateJats', [$dom]);
 
-        // The same fixture reports DTD errors when it declares JATS 1.2
         $this->assertTrue($result, 'A version we cannot validate should not fail the export');
-        $this->assertSame(
-            ['plugins.importexport.inspec.export.warning.jatsVersionUnsupported'],
-            $this->invoke($plugin, 'getValidationWarnings')
-        );
     }
 
     public function testValidateJatsSkipsTheDtdWhenNoDoctypeIsDeclared(): void
     {
-        $plugin = $this->createPlugin();
-
-        $result = $this->invoke($plugin, 'validateJats', [$this->jatsDocument()]);
+        $result = $this->invoke($this->createPlugin(), 'validateJats', [$this->jatsDocument()]);
 
         $this->assertTrue($result);
-        $this->assertSame(
-            ['plugins.importexport.inspec.export.warning.jatsVersionUnsupported'],
-            $this->invoke($plugin, 'getValidationWarnings')
-        );
-    }
-
-    public function testValidationWarningsAreReportedOncePerExport(): void
-    {
-        $plugin = $this->createPlugin();
-
-        // An export covers many articles, each of which may raise the same warning
-        $this->invoke($plugin, 'validateJats', [$this->jatsDocument()]);
-        $this->invoke($plugin, 'validateJats', [$this->jatsDocument()]);
-
-        $this->assertSame(
-            ['plugins.importexport.inspec.export.warning.jatsVersionUnsupported'],
-            $this->invoke($plugin, 'getValidationWarnings')
-        );
     }
 }
