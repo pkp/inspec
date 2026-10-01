@@ -88,6 +88,17 @@ class InspecPlugin extends PubObjectsExportGenericPlugin
         return Hook::CONTINUE;
     }
 
+    /**
+     * @copydoc PubObjectsExportGenericPlugin::handleIdentityRestamped()
+     *
+     * Overridden to do nothing: re-stamping the journal identity must not mark an
+     * already-deposited article stale, which would cause it to be re-deposited.
+     */
+    public function handleIdentityRestamped($hookName, $params): bool
+    {
+        return Hook::CONTINUE;
+    }
+
     protected function setExportPlugin(): void
     {
         PluginRegistry::register('importexport', new InspecExportPlugin(), $this->getPluginPath());
