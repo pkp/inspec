@@ -62,7 +62,6 @@ class InspecSettingsFormTest extends PKPTestCase
         $this->assertSame([
             'jatsImported' => 'bool',
             'automaticRegistration' => 'bool',
-            'namingType' => 'string',
             'host' => 'string',
             'port' => 'string',
             'path' => 'string',

@@ -65,7 +65,6 @@ Journal Settings → Distribution → Inspec, or the plugin's Import/Export page
 |--------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------|
 | Only use uploaded JATS XML           | When enabled, articles without an uploaded JATS file are skipped rather than falling back to system-generated JATS.                     |
 | Automatic deposit                    | Deposit newly published articles on the daily scheduled task.                                                                           |
-| Package and file naming scheme       | Either volume/issue/page or article number. The chosen scheme's metadata must be present or the export fails with an explanatory error. |
 | Host, Port, Path, Username, Password | SFTP connection details. Port defaults to 22. The password is stored encrypted.                                                         |
 
 The SFTP account is optional — a journal can use Export to download packages and deliver
@@ -76,19 +75,19 @@ appear once host, username, and password are all set.
 ## Naming
 
 Package and file names are built from the journal abbreviation (Journal Settings → Masthead),
-falling back to the journal's URL path when no abbreviation is set, plus the selected naming
-scheme, lowercased with all non-alphanumeric characters removed:
+falling back to the journal's URL path when no abbreviation is set, the submission ID, and the
+version (e.g. `VoR1`), with all non-alphanumeric characters removed:
 
 ```
-jhs-12-3-45.zip
-└── jhs-12-3-45/
-    ├── jhs-12-3-45.pdf
-    └── jhs-12-3-45.xml
+JHS_123_VoR1_20261002143015.zip
+└── JHS_123_VoR1/
+    ├── JHS_123_VoR1.pdf
+    └── JHS_123_VoR1.xml
 ```
 
-Downloaded packages also carry a timestamp. When several articles are downloaded at once the
-result is a zip of per-article zips — unpack it and deposit the individual article packages,
-not the outer file.
+The package name carries a timestamp. When several articles are downloaded at once the
+result is a timestamped zip of per-article zips (e.g. `JHS_20261002143015.zip`) — unpack it
+and deposit the individual article packages, not the outer file.
 
 ## Deposit status
 

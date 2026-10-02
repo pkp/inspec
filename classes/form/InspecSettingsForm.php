@@ -84,10 +84,6 @@ class InspecSettingsForm extends PubObjectsExportSettingsForm
         foreach ($this->getFormFields() as $fieldName => $fieldType) {
             $this->setData($fieldName, $plugin->getSetting($contextId, $fieldName));
         }
-        // Default to volume/issue naming when no value has been saved.
-        if (!$this->getData('namingType')) {
-            $this->setData('namingType', 'volumeIssue');
-        }
     }
 
     /**
@@ -128,7 +124,6 @@ class InspecSettingsForm extends PubObjectsExportSettingsForm
         return [
             'jatsImported' => 'bool',
             'automaticRegistration' => 'bool',
-            'namingType' => 'string',
             'host' => 'string',
             'port' => 'string',
             'path' => 'string',

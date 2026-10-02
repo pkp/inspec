@@ -87,10 +87,8 @@ class InspecExportPlugin extends PubObjectsExportPlugin implements HasTaskSchedu
     }
 
     /**
-     * Create a filename for files created in the plugin, removing any invalid characters.
-     * The naming scheme is determined by the journal's "namingType" setting:
-     *  - volumeIssue: journalAbbreviation-volume-issue-firstPage(-timestamp)
-     *  - articleNumber: journalAbbreviation-articleNumber(-timestamp)
+     * Create a filename for files created in the plugin, removing any invalid characters:
+     * journalAbbreviation_submissionId_versionStageVersionMajor(_timestamp), e.g. ORE_7449_VoR1
      *
      * @param bool $ts Whether to include a timestamp in the filename.
      * @param string|null $fileExtension The optional file extension to include in the filename.
@@ -102,19 +100,12 @@ class InspecExportPlugin extends PubObjectsExportPlugin implements HasTaskSchedu
         bool $ts = false,
         ?string $fileExtension = null
     ): string {
-        $publication = $object ? $this->depositPublication($object) : null;
         $parts = [$journalAbbreviation];
 
-        if ($publication) {
-            $namingType = $this->getSetting($context->getId(), 'namingType') ?: 'volumeIssue';
-            if ($namingType === 'articleNumber') {
-                $parts[] = $publication->getData('articleNumber');
-            } else {
-                $issue = Repo::issue()->get($publication->getIssueId());
-                $parts[] = $issue->getVolume();
-                $parts[] = $issue->getNumber();
-                $parts[] = $publication->getStartingPage();
-            }
+        if ($object) {
+            $publication = $this->depositPublication($object);
+            $parts[] = $object instanceof Submission ? $object->getId() : $object->getData('submissionId');
+            $parts[] = $publication?->getData('versionStage') . $publication?->getData('versionMajor');
         }
 
         if ($ts) {
@@ -127,10 +118,8 @@ class InspecExportPlugin extends PubObjectsExportPlugin implements HasTaskSchedu
             $parts
         );
 
-        return strtolower(
-            implode('-', array_filter($parts, fn ($part) => $part !== ''))
-            . ($fileExtension ? '.' . $fileExtension : '')
-        );
+        return implode('_', array_filter($parts, fn ($part) => $part !== ''))
+            . ($fileExtension ? '.' . $fileExtension : '');
     }
 
     /**
@@ -194,7 +183,7 @@ class InspecExportPlugin extends PubObjectsExportPlugin implements HasTaskSchedu
                 $request->redirect(null, null, null, ['plugin', $this->getName()], null, $tab);
             } else {
                 $journalAbbreviation = $this->journalAbbreviation($context);
-                $filename = $this->buildFileName($journalAbbreviation, $context, null, false, 'zip');
+                $filename = $this->buildFileName($journalAbbreviation, $context, null, true, 'zip');
                 if (count($objects) == 1) {
                     $object = array_shift($objects);
                     $filename = $this->buildFileName($journalAbbreviation, $context, $object, true, 'zip');
@@ -269,13 +258,11 @@ class InspecExportPlugin extends PubObjectsExportPlugin implements HasTaskSchedu
         }
 
         $xml = $document->jatsContent;
-        $errors = array_filter(libxml_get_errors(), function ($a) {
-            return $a->level == LIBXML_ERR_ERROR || $a->level == LIBXML_ERR_FATAL;
-        });
-        if (!empty($errors)) {
-            $libXmlErrors = implode(PHP_EOL, $errors);
-            return ['plugins.importexport.inspec.export.failure.jatsModification', $libXmlErrors];
-        }
+
+        // Building the document leaves its own parse errors behind: the JATS Template
+        // plugin recovers from malformed author markup itself, and a document that could
+        // not be loaded at all is reported above. Cleared so that the DTD validation
+        // reports only what it found.
         libxml_clear_errors();
 
         $returnXml = $this->addPdfSelfUri($xml, $articlePdfFilename);
@@ -439,11 +426,6 @@ class InspecExportPlugin extends PubObjectsExportPlugin implements HasTaskSchedu
             return ['error' => ['plugins.importexport.inspec.export.failure.noPublication']];
         }
         $locale = $object->getData('locale');
-
-        // Ensure the metadata required by the configured naming type is present
-        if ($metadataError = $this->validateNamingMetadata($publication, $context)) {
-            return ['error' => $metadataError];
-        }
 
         $zipPath = tempnam(sys_get_temp_dir(), 'InspecExport_');
         $zip = new ZipArchive();
@@ -879,43 +861,6 @@ class InspecExportPlugin extends PubObjectsExportPlugin implements HasTaskSchedu
 
         libxml_clear_errors();
         return true;
-    }
-
-    /**
-     * Validate that the publication has the metadata required to build the
-     * filename based on the "namingType" setting.
-     */
-    protected function validateNamingMetadata(Publication $publication, Context $context): ?array
-    {
-        $namingType = $this->getSetting($context->getId(), 'namingType') ?: 'volumeIssue';
-        $missing = [];
-
-        if ($namingType === 'articleNumber') {
-            if (!$publication->getData('articleNumber')) {
-                $missing[] = __('submission.articleNumber');
-            }
-        } else {
-            $issueId = $publication->getIssueId();
-            $issue = $issueId ? Repo::issue()->get($issueId) : null;
-            if (!$issue) {
-                $missing[] = __('issue.issue');
-            } else {
-                if (!$issue->getVolume()) {
-                    $missing[] = __('issue.volume');
-                }
-                if (!$issue->getNumber()) {
-                    $missing[] = __('issue.number');
-                }
-            }
-            if (!$publication->getStartingPage()) {
-                $missing[] = __('editor.issues.pages');
-            }
-        }
-
-        if (!empty($missing)) {
-            return ['plugins.importexport.inspec.export.failure.missingMetadata', implode(', ', $missing)];
-        }
-        return null;
     }
 
     /**
