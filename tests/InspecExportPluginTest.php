@@ -12,8 +12,6 @@
 
 namespace APP\plugins\generic\inspec\tests;
 
-use APP\issue\Issue;
-use APP\issue\Repository as IssueRepository;
 use APP\journal\Journal;
 use APP\plugins\generic\inspec\InspecExportPlugin;
 use APP\plugins\PubObjectsExportPlugin;
@@ -24,6 +22,8 @@ use DOMDocument;
 use DOMXPath;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
+use PKP\jats\JatsFile;
+use PKP\jats\Repository as JatsRepository;
 use PKP\tests\PKPTestCase;
 use ReflectionMethod;
 use ZipArchive;
@@ -47,14 +47,6 @@ class InspecExportPluginTest extends PKPTestCase
             </front>
         </article>
         XML;
-
-    protected function tearDown(): void
-    {
-        // Drop any container binding a test may have replaced so that the next
-        // resolution builds a fresh instance.
-        app()->forgetInstance(IssueRepository::class);
-        parent::tearDown();
-    }
 
     /**
      * Build the plugin with its settings stubbed out.
@@ -228,7 +220,7 @@ class InspecExportPluginTest extends PKPTestCase
         $plugin = $this->createPlugin();
 
         $this->assertSame(
-            'jhs',
+            'JHS',
             $this->invoke($plugin, 'buildFileName', ['JHS', $this->createJournal()])
         );
     }
@@ -238,105 +230,37 @@ class InspecExportPluginTest extends PKPTestCase
         $plugin = $this->createPlugin();
 
         $this->assertSame(
-            'jhs.zip',
+            'JHS.zip',
             $this->invoke($plugin, 'buildFileName', ['JHS', $this->createJournal(), null, false, 'zip'])
         );
     }
 
-    public function testBuildFileNameUsesTheArticleNumberScheme(): void
+    public function testBuildFileNameUsesTheSubmissionIdAndVersionOfAPublication(): void
     {
-        $plugin = $this->createPlugin(['namingType' => 'articleNumber']);
-        $publication = new Publication();
-        $publication->setData('articleNumber', 'e12345');
+        $plugin = $this->createPlugin();
+        $publication = $this->publishedPublication(1, ['submissionId' => 7449, 'versionMajor' => 1]);
 
         $this->assertSame(
-            'jhs-e12345.xml',
-            $this->invoke($plugin, 'buildFileName', ['JHS', $this->createJournal(), $publication, false, 'xml'])
+            'ORE_7449_VoR1.xml',
+            $this->invoke($plugin, 'buildFileName', ['ORE', $this->createJournal(), $publication, false, 'xml'])
         );
     }
 
-    public function testBuildFileNameUsesTheVolumeIssueScheme(): void
-    {
-        $plugin = $this->createPlugin(['namingType' => 'volumeIssue']);
-
-        $issue = new Issue();
-        $issue->setData('volume', 12);
-        $issue->setData('number', 3);
-        $issueRepository = $this->createMock(IssueRepository::class);
-        $issueRepository->method('get')->willReturn($issue);
-        app()->instance(IssueRepository::class, $issueRepository);
-
-        $publication = new Publication();
-        $publication->setData('issueId', 7);
-        $publication->setData('pages', '45-52');
-
-        $this->assertSame(
-            'jhs-12-3-45.xml',
-            $this->invoke($plugin, 'buildFileName', ['JHS', $this->createJournal(), $publication, false, 'xml'])
-        );
-    }
-
-    /**
-     * A part that resolves to nothing is dropped rather than left as a stray separator.
-     */
-    public function testBuildFileNameDropsEmptyParts(): void
-    {
-        $plugin = $this->createPlugin(['namingType' => 'volumeIssue']);
-
-        $issue = new Issue();
-        $issue->setData('volume', 12);
-        $issueRepository = $this->createMock(IssueRepository::class);
-        $issueRepository->method('get')->willReturn($issue);
-        app()->instance(IssueRepository::class, $issueRepository);
-
-        $publication = new Publication();
-        $publication->setData('issueId', 7);
-
-        $this->assertSame(
-            'jhs-12',
-            $this->invoke($plugin, 'buildFileName', ['JHS', $this->createJournal(), $publication])
-        );
-    }
-
-    public function testBuildFileNameDefaultsToTheVolumeIssueSchemeWhenUnset(): void
+    public function testBuildFileNameUsesTheCurrentPublicationOfASubmission(): void
     {
         $plugin = $this->createPlugin();
 
-        $issue = new Issue();
-        $issue->setData('volume', 12);
-        $issue->setData('number', 3);
-        $issueRepository = $this->createMock(IssueRepository::class);
-        $issueRepository->method('get')->willReturn($issue);
-        app()->instance(IssueRepository::class, $issueRepository);
-
-        $publication = new Publication();
-        $publication->setData('issueId', 7);
-        $publication->setData('pages', '45-52');
-
-        $this->assertSame(
-            'jhs-12-3-45',
-            $this->invoke($plugin, 'buildFileName', ['JHS', $this->createJournal(), $publication])
-        );
-    }
-
-    /**
-     * A submission is named after its current publication, so the name matches the
-     * metadata the article displays.
-     */
-    public function testBuildFileNameResolvesTheCurrentPublicationOfASubmission(): void
-    {
-        $plugin = $this->createPlugin(['namingType' => 'articleNumber']);
-
-        $earlier = $this->publishedPublication(1, ['articleNumber' => 'e999']);
-        $current = $this->publishedPublication(2, ['articleNumber' => 'e111']);
-
         $submission = new Submission();
-        $submission->setData('publications', collect([$earlier, $current]));
+        $submission->setId(7449);
+        $submission->setData('publications', collect([
+            $this->publishedPublication(1, ['versionMajor' => 1]),
+            $this->publishedPublication(2, ['versionMajor' => 2]),
+        ]));
         $submission->setData('currentPublicationId', 2);
 
         $this->assertSame(
-            'jhs-e111',
-            $this->invoke($plugin, 'buildFileName', ['JHS', $this->createJournal(), $submission])
+            'ORE_7449_VoR2',
+            $this->invoke($plugin, 'buildFileName', ['ORE', $this->createJournal(), $submission])
         );
     }
 
@@ -403,15 +327,13 @@ class InspecExportPluginTest extends PKPTestCase
         return $publication;
     }
 
-    public function testBuildFileNameStripsNonAlphanumericCharactersAndLowercases(): void
+    public function testBuildFileNameStripsNonAlphanumericCharacters(): void
     {
-        $plugin = $this->createPlugin(['namingType' => 'articleNumber']);
-        $publication = new Publication();
-        $publication->setData('articleNumber', 'e 12/345');
+        $plugin = $this->createPlugin();
+        $publication = $this->publishedPublication(1, ['submissionId' => 7449, 'versionMajor' => 1]);
 
-        // Punctuation and whitespace are removed; digits and letters survive.
         $this->assertSame(
-            'jpubknowledge1-e12345',
+            'JPubKnowledge1_7449_VoR1',
             $this->invoke(
                 $plugin,
                 'buildFileName',
@@ -422,17 +344,16 @@ class InspecExportPluginTest extends PKPTestCase
 
     public function testBuildFileNameAppendsATimestamp(): void
     {
-        $plugin = $this->createPlugin(['namingType' => 'articleNumber']);
-        $publication = new Publication();
-        $publication->setData('articleNumber', 'e12345');
+        $plugin = $this->createPlugin();
+        $publication = $this->publishedPublication(1, ['submissionId' => 7449, 'versionMajor' => 1]);
 
         $filename = $this->invoke(
             $plugin,
             'buildFileName',
-            ['JHS', $this->createJournal(), $publication, true, 'zip']
+            ['ORE', $this->createJournal(), $publication, true, 'zip']
         );
 
-        $this->assertMatchesRegularExpression('/^jhs-e12345-\d{14}\.zip$/', $filename);
+        $this->assertMatchesRegularExpression('/^ORE_7449_VoR1_\\d{14}\\.zip$/', $filename);
     }
 
     //
@@ -489,7 +410,7 @@ class InspecExportPluginTest extends PKPTestCase
 
     public function testASingleObjectIsDownloadedAsItsOwnPackage(): void
     {
-        $package = $this->buildPackage('jhs-1-1-1');
+        $package = $this->buildPackage('JHS_1_VoR1');
         $plugin = $this->createPluginWithPackages([$package]);
 
         $result = $this->invoke($plugin, 'createZipCollection', [[new Submission()], $this->createJournal()]);
@@ -497,14 +418,14 @@ class InspecExportPluginTest extends PKPTestCase
         $this->assertSame($package['path'], $result['path'], 'The package itself is the download');
 
         // Guards the regression this replaced: a lone article wrapped in a collection zip
-        $this->assertSame(['jhs-1-1-1/jhs-1-1-1.xml'], $this->zipEntries($result['path']));
+        $this->assertSame(['JHS_1_VoR1/JHS_1_VoR1.xml'], $this->zipEntries($result['path']));
 
         unlink($package['path']);
     }
 
     public function testSeveralObjectsAreGatheredIntoACollection(): void
     {
-        $packages = [$this->buildPackage('jhs-1-1-1'), $this->buildPackage('jhs-1-1-9')];
+        $packages = [$this->buildPackage('JHS_1_VoR1'), $this->buildPackage('JHS_9_VoR1')];
         $plugin = $this->createPluginWithPackages($packages);
 
         $result = $this->invoke(
@@ -513,7 +434,7 @@ class InspecExportPluginTest extends PKPTestCase
             [[new Submission(), new Submission()], $this->createJournal()]
         );
 
-        $this->assertSame(['jhs-1-1-1.zip', 'jhs-1-1-9.zip'], $this->zipEntries($result['path']));
+        $this->assertSame(['JHS_1_VoR1.zip', 'JHS_9_VoR1.zip'], $this->zipEntries($result['path']));
 
         // The per-article packages are cleaned up once the collection is closed
         foreach ($packages as $package) {
@@ -614,13 +535,55 @@ class InspecExportPluginTest extends PKPTestCase
     }
 
     //
+    // exportXML()
+    //
+
+    /**
+     * Building the JATS can leave recoverable libxml errors behind; they are not
+     * failures of the export, and must not be reported as (or break) one.
+     */
+    public function testExportXmlIgnoresLeftoverLibxmlErrors(): void
+    {
+        $jatsFile = $this->getMockBuilder(JatsFile::class)
+            ->disableOriginalConstructor()
+            ->getMock();
+        $jatsFile->jatsContent = $this->jats();
+        $jatsRepository = $this->createMock(JatsRepository::class);
+        $jatsRepository->method('getJatsFile')->willReturn($jatsFile);
+        app()->instance(JatsRepository::class, $jatsRepository);
+
+        $publication = new Publication();
+        $publication->setId(1);
+        $publication->setData('submissionId', 7449);
+
+        $previous = libxml_use_internal_errors(true);
+        try {
+            (new DOMDocument())->loadXML('<p>unclosed');
+            $this->assertNotEmpty(libxml_get_errors());
+
+            $outputErrors = null;
+            $result = (new ReflectionMethod(InspecExportPlugin::class, 'exportXML'))->invokeArgs(
+                $this->createPlugin(),
+                [$publication, null, $this->createJournal(), true, &$outputErrors, null, collect()]
+            );
+        } finally {
+            app()->forgetInstance(JatsRepository::class);
+            libxml_clear_errors();
+            libxml_use_internal_errors($previous);
+        }
+
+        $this->assertIsString($result);
+        $this->assertStringContainsString('<article-title>Test article</article-title>', $result);
+    }
+
+    //
     // addPdfSelfUri()
     //
     public function testSelfUriIsInsertedBeforeTheAbstract(): void
     {
         $plugin = $this->createPlugin();
 
-        $result = $this->invoke($plugin, 'addPdfSelfUri', [$this->jats(), 'jhs-12-3-45.pdf']);
+        $result = $this->invoke($plugin, 'addPdfSelfUri', [$this->jats(), 'JHS_123_VoR1.pdf']);
 
         $this->assertIsString($result);
         $xpath = $this->xpath($result);
@@ -628,7 +591,7 @@ class InspecExportPluginTest extends PKPTestCase
         $selfUris = $xpath->query('//article-meta/self-uri');
         $this->assertSame(1, $selfUris->length);
         $this->assertSame('pdf', $selfUris->item(0)->getAttribute('content-type'));
-        $this->assertSame('jhs-12-3-45.pdf', $selfUris->item(0)->getAttribute('xlink:href'));
+        $this->assertSame('JHS_123_VoR1.pdf', $selfUris->item(0)->getAttribute('xlink:href'));
 
         // The abstract must follow the new element.
         $this->assertSame(
@@ -643,7 +606,7 @@ class InspecExportPluginTest extends PKPTestCase
         $plugin = $this->createPlugin();
         $jats = $this->jats('<self-uri content-type="html" xlink:href="article.html"/>');
 
-        $result = $this->invoke($plugin, 'addPdfSelfUri', [$jats, 'jhs-12-3-45.pdf']);
+        $result = $this->invoke($plugin, 'addPdfSelfUri', [$jats, 'JHS_123_VoR1.pdf']);
 
         $xpath = $this->xpath($result);
         $selfUris = $xpath->query('//article-meta/self-uri');
@@ -705,20 +668,20 @@ class InspecExportPluginTest extends PKPTestCase
             $withoutPdf->query('//article-meta/self-uri')->item(0)->getAttribute('xlink:href')
         );
 
-        $withPdf = $this->xpath($this->invoke($plugin, 'addPdfSelfUri', [$jats, 'jhs.pdf']));
+        $withPdf = $this->xpath($this->invoke($plugin, 'addPdfSelfUri', [$jats, 'JHS_123_VoR1.pdf']));
         $hrefs = [];
         foreach ($withPdf->query('//article-meta/self-uri') as $selfUri) {
             $hrefs[] = $selfUri->getAttribute('xlink:href');
         }
-        $this->assertSame(['jhs.pdf', 'article.html'], $hrefs);
+        $this->assertSame(['JHS_123_VoR1.pdf', 'article.html'], $hrefs);
     }
 
     public function testAddPdfSelfUriIsIdempotent(): void
     {
         $plugin = $this->createPlugin();
 
-        $once = $this->invoke($plugin, 'addPdfSelfUri', [$this->jats(), 'jhs.pdf']);
-        $twice = $this->invoke($plugin, 'addPdfSelfUri', [$once, 'jhs.pdf']);
+        $once = $this->invoke($plugin, 'addPdfSelfUri', [$this->jats(), 'JHS_123_VoR1.pdf']);
+        $twice = $this->invoke($plugin, 'addPdfSelfUri', [$once, 'JHS_123_VoR1.pdf']);
 
         $this->assertSame($once, $twice);
     }
@@ -730,7 +693,7 @@ class InspecExportPluginTest extends PKPTestCase
 
         $this->assertSame(
             ['plugins.importexport.inspec.export.failure.jatsNodeMissing', 'article-meta'],
-            $this->invoke($plugin, 'addPdfSelfUri', [$jats, 'jhs.pdf'])
+            $this->invoke($plugin, 'addPdfSelfUri', [$jats, 'JHS_123_VoR1.pdf'])
         );
     }
 
@@ -743,7 +706,7 @@ class InspecExportPluginTest extends PKPTestCase
 
         $this->assertSame(
             ['plugins.importexport.inspec.export.failure.jatsNodeMissing', 'abstract'],
-            $this->invoke($plugin, 'addPdfSelfUri', [$jats, 'jhs.pdf'])
+            $this->invoke($plugin, 'addPdfSelfUri', [$jats, 'JHS_123_VoR1.pdf'])
         );
     }
 
@@ -755,7 +718,7 @@ class InspecExportPluginTest extends PKPTestCase
         // handling; exportXML() does this before calling it.
         $previous = libxml_use_internal_errors(true);
         try {
-            $result = $this->invoke($plugin, 'addPdfSelfUri', ['<article><front>', 'jhs.pdf']);
+            $result = $this->invoke($plugin, 'addPdfSelfUri', ['<article><front>', 'JHS_123_VoR1.pdf']);
         } finally {
             libxml_clear_errors();
             libxml_use_internal_errors($previous);
@@ -776,10 +739,10 @@ class InspecExportPluginTest extends PKPTestCase
             . '<abstract><p>An abstract.</p></abstract>'
             . '</article-meta></front></article>';
 
-        $result = $this->invoke($plugin, 'addPdfSelfUri', [$jats, 'jhs.pdf']);
+        $result = $this->invoke($plugin, 'addPdfSelfUri', [$jats, 'JHS_123_VoR1.pdf']);
 
         $this->assertIsString($result);
-        $this->assertStringContainsString('xlink:href="jhs.pdf"', $result);
+        $this->assertStringContainsString('xlink:href="JHS_123_VoR1.pdf"', $result);
     }
 
     //
