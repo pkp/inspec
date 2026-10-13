@@ -24,10 +24,6 @@
 			</p>
 			<br/>
 			{fbvFormSection list="true"}
-				{fbvElement type="checkbox" id="jatsImported" label="plugins.importexport.inspec.settings.form.jatsImportedOnly" checked=$jatsImported|compare:true}
-			{/fbvFormSection}
-
-			{fbvFormSection list="true"}
 				{fbvElement type="checkbox" id="automaticRegistration" label="plugins.importexport.inspec.settings.form.automaticRegistration.description" checked=$automaticRegistration|compare:true}
 			{/fbvFormSection}
 
