@@ -7,7 +7,7 @@ An OJS plugin to export journal articles as JATS XML packages and deposit them t
 
 For each selected article the plugin builds a zip package containing:
 
-- the article's JATS XML, and
+- the article's uploaded JATS XML, and
 - the article's PDF galley (referenced from the XML with a `<self-uri>` element).
 
 Packages can either be downloaded for manual delivery, or deposited directly to Inspec's
@@ -41,20 +41,13 @@ continue to index the uncorrected first version. There is no mechanism to push t
 - A way of running queued jobs, since deposits are dispatched as jobs: either OJS's
   scheduled `ProcessQueueJobs` task (which runs with the rest of the scheduler) or a
   dedicated worker, `php lib/pkp/tools/jobs.php work`.
-- The [JATS Template plugin](https://github.com/pkp/jatsTemplate), which generates the JATS XML
-  when an article has no JATS file of its own.
+- A valid JATS XML file uploaded to each publication. OJS-generated JATS has no usable body
+  or media files, so a publication without an uploaded file fails to export.
 - The `league/flysystem-sftp-v3` library, bundled with OJS. If it is missing,
   the settings page will say so; install it with:
 
   ```bash
   composer -d lib/pkp require league/flysystem-sftp-v3
-  ```
-
-- To include article full text in generated JATS, `pdftotext` must be enabled in
-  `config.inc.php` under `[search]`:
-
-  ```
-  index[application/pdf] = "/usr/bin/pdftotext %s -"
   ```
 
 ## Settings
@@ -63,7 +56,6 @@ Journal Settings → Distribution → Inspec, or the plugin's Import/Export page
 
 | Setting                              | Description                                                                                                                             |
 |--------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------|
-| Only use uploaded JATS XML           | When enabled, articles without an uploaded JATS file are skipped rather than falling back to system-generated JATS.                     |
 | Automatic deposit                    | Deposit newly published articles on the daily scheduled task.                                                                           |
 | Host, Port, Path, Username, Password | SFTP connection details. Port defaults to 22. The password is stored encrypted.                                                         |
 

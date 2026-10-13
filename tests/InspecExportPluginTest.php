@@ -548,6 +548,7 @@ class InspecExportPluginTest extends PKPTestCase
             ->disableOriginalConstructor()
             ->getMock();
         $jatsFile->jatsContent = $this->jats();
+        $jatsFile->isDefaultContent = false;
         $jatsRepository = $this->createMock(JatsRepository::class);
         $jatsRepository->method('getJatsFile')->willReturn($jatsFile);
         app()->instance(JatsRepository::class, $jatsRepository);
@@ -574,6 +575,34 @@ class InspecExportPluginTest extends PKPTestCase
 
         $this->assertIsString($result);
         $this->assertStringContainsString('<article-title>Test article</article-title>', $result);
+    }
+
+    public function testExportXmlRefusesGeneratedJats(): void
+    {
+        $jatsFile = $this->getMockBuilder(JatsFile::class)
+            ->disableOriginalConstructor()
+            ->getMock();
+        $jatsFile->jatsContent = $this->jats();
+        $jatsFile->isDefaultContent = true;
+        $jatsRepository = $this->createMock(JatsRepository::class);
+        $jatsRepository->method('getJatsFile')->willReturn($jatsFile);
+        app()->instance(JatsRepository::class, $jatsRepository);
+
+        $publication = new Publication();
+        $publication->setId(1);
+        $publication->setData('submissionId', 7449);
+
+        try {
+            $outputErrors = null;
+            $result = (new ReflectionMethod(InspecExportPlugin::class, 'exportXML'))->invokeArgs(
+                $this->createPlugin(),
+                [$publication, null, $this->createJournal(), true, &$outputErrors, null, collect()]
+            );
+        } finally {
+            app()->forgetInstance(JatsRepository::class);
+        }
+
+        $this->assertSame(['plugins.importexport.inspec.export.failure.jatsFileNotFound'], $result);
     }
 
     //

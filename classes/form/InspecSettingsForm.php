@@ -122,7 +122,6 @@ class InspecSettingsForm extends PubObjectsExportSettingsForm
     public function getFormFields(): array
     {
         return [
-            'jatsImported' => 'bool',
             'automaticRegistration' => 'bool',
             'host' => 'string',
             'port' => 'string',

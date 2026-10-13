@@ -243,15 +243,11 @@ class InspecExportPlugin extends PubObjectsExportPlugin implements HasTaskSchedu
         $document = Repo::jats()
             ->getJatsFile($publication->getId(), $submissionId, $genres->toArray());
 
-        // If this setting is enabled, only export user-uploaded JATS files and
-        // do not generate our own JATS.
-        $jatsImportedOnly = $this->jatsImportedOnly($context);
-
-        // Check if the JATS file was found and that it was not generated if the setting is enabled.
+        // Only uploaded JATS is exported for now: generated JATS has no usable body or media.
         if (
             !$document ||
             !$document->jatsContent ||
-            ($jatsImportedOnly && $document->isDefaultContent) ||
+            $document->isDefaultContent ||
             $document->loadingContentError
         ) {
             return ['plugins.importexport.inspec.export.failure.jatsFileNotFound'];
@@ -288,14 +284,6 @@ class InspecExportPlugin extends PubObjectsExportPlugin implements HasTaskSchedu
     public function getPluginSettingsPrefix(): string
     {
         return 'inspec';
-    }
-
-    /**
-     * Get the JATS import setting value.
-     */
-    public function jatsImportedOnly(Context $context): bool
-    {
-        return ($this->getSetting($context->getId(), 'jatsImported') == 1);
     }
 
     /**
